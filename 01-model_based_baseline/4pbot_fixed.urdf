@@ -1,0 +1,160 @@
+<?xml version="1.0" ?>
+
+<robot name="4pbot">
+
+    <link name="link0">
+        <inertial>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <mass value="1" />
+            <inertia ixx="0.084167" iyy="0.083467" izz="0.000967" ixy="0" ixz="0" iyz="0" />
+        </inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.10 1.0" />
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0.02 0.0 1.0" rpy="0 1.5707963267948966 0" />
+            <geometry>
+                <cylinder radius="0.1" length="0.04" />
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.4 0.1" />
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.4 0.1" />
+            </geometry>
+        </collision>
+    </link>
+    <link name="link1">
+        <inertial>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <mass value="1" />
+            <inertia ixx="0.084167" iyy="0.083467" izz="0.000967" ixy="0" ixz="0" iyz="0" />
+        </inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.10 1.0" />
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="-0.02 0.0 1.0" rpy="0 1.5707963267948966 0" />
+            <geometry>
+                <cylinder radius="0.1" length="0.04" />
+            </geometry>
+        </visual>
+    </link>
+    <link name="link2">
+        <inertial>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <mass value="1" />
+            <inertia ixx="0.084167" iyy="0.083467" izz="0.000967" ixy="0" ixz="0" iyz="0" />
+        </inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.10 1.0" />
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.10 1.0" />
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-0.02 0.0 1.0" rpy="0 1.5707963267948966 0" />
+            <geometry>
+                <cylinder radius="0.1" length="0.04" />
+            </geometry>
+        </visual>
+    </link>
+    <link name="link3">
+        <inertial>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <mass value="1" />
+            <inertia ixx="0.084167" iyy="0.083467" izz="0.000967" ixy="0" ixz="0" iyz="0" />
+        </inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.10 1.0" />
+            </geometry>
+        </visual>
+<!--         <collision>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.10 1.0" />
+            </geometry>
+        </collision> -->
+        <visual>
+            <origin xyz="-0.02 0.0 1.0" rpy="0 1.5707963267948966 0" />
+            <geometry>
+                <cylinder radius="0.1" length="0.04" />
+            </geometry>
+        </visual>
+    </link>
+     <link name="link4">
+        <inertial>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <mass value="1" />
+            <inertia ixx="0.084167" iyy="0.083467" izz="0.000967" ixy="0" ixz="0" iyz="0" />
+        </inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.5" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.10 1.0" />
+            </geometry>
+        </visual>
+        <visual>
+            <origin xyz="0.0 0.0 1.0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.4 0.1" />
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0.0 0.0 1.0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.04 0.4 0.1" />
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="j0" type="revolute">
+        <parent link="link0" />
+        <child link="link1" />
+        <origin xyz="0.000000 0.000000 1.000000" rpy="-0.000000 0.000000 -0.000000" />
+        <axis xyz="1 0 0" />
+        <limit lower="-2.967" upper="2.967" effort="176" velocity="1.7104" />
+    </joint>     
+    <joint name="j1" type="revolute">
+        <parent link="link1" />
+        <child link="link2" />
+        <origin xyz="0.000000 0.000000 1.000000" rpy="-0.000000 0.000000 -0.000000" />
+        <axis xyz="1 0 0" />
+        <limit lower="-2.967" upper="2.967" effort="176" velocity="1.7104" />
+    </joint> 
+    <joint name="j2" type="revolute">
+        <parent link="link2" />
+        <child link="link3" />
+        <origin xyz="0.000000 0.000000 1.000000" rpy="-0.000000 0.000000 -0.000000" />
+        <axis xyz="1 0 0" />
+        <limit lower="-2.967" upper="2.967" effort="176" velocity="1.7104" />
+    </joint> 
+    <joint name="j3" type="revolute">
+        <parent link="link3" />
+        <child link="link4" />
+        <origin xyz="0.000000 0.000000 1.000000" rpy="-0.000000 0.000000 -0.000000" />
+        <axis xyz="1 0 0" />
+        <limit lower="-2.967" upper="2.967" effort="176" velocity="1.7104" />
+    </joint> 
+    
+</robot>
