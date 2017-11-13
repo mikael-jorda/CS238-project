@@ -33,6 +33,18 @@ ofstream real_file, estimate_file;
 
 Eigen::Vector3d robot_origin = Eigen::Vector3d(0.0, -1.5, 0.050001);
 
+// filtering the force signals
+bool filter_forces = false;
+// bool filter_forces = true;
+// filter eq : y[n] = (x[n-2] + 2x[n-1] + x[n])/gain + a1*y[n-2] + a2*y[n-1]
+double coeff_controller_filter[2] = {-0.87521, 1.86689}; // assumes control freq = 1kHz, hard coded butterworth filter order 2 15Hz cutoff
+double coeff_simulation_filter[2] = {-0.93553, 1.93338}; // assumes sim freq = 2kHz, hard coded butterworth filter order 2 15Hz cutoff
+double controller_filter_gain = 4.806381793e+02;
+double simulation_filter_gain = 1.861608837e+03;
+Eigen::Vector2d Fepp, Fep, Feppf, Fepf, Fef;
+Eigen::Vector2d Frpp, Frp, Frppf, Frpf, Frf;
+
+
 // simulation loop
 void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
 void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
@@ -76,9 +88,7 @@ int main (int argc, char** argv) {
 	// load simulation world
 	auto sim = new Simulation::Sai2Simulation(world_file, Simulation::urdf, false);
 	sim->setCollisionRestitution(0);
-	sim->setCoeffFrictionStatic(0);
-
-	
+	sim->setCoeffFrictionStatic(0.6);
 
 	// set initial condition
 	robot->_q << -50.0/180.0*M_PI,
@@ -102,6 +112,18 @@ int main (int argc, char** argv) {
 	estimate_file.open(datafile_estimate);
 	estimate_file << "time \t force \t position\n";
 	real_file << "time \t force \t position\n";
+
+	// initialize filter variables
+	Fepp.setZero();
+	Fep.setZero();
+	Feppf.setZero();
+	Fepf.setZero();
+	Fef.setZero();
+	Frpp.setZero();
+	Frp.setZero();
+	Frppf.setZero();
+	Frpf.setZero();
+	Frf.setZero();
 
 	// start the simulation thread first
 	fSimulationRunning = true;
@@ -369,6 +391,20 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			estimated_Fc = Ri*estimated_Fc;
 		}
 
+		// filter forces
+		if(filter_forces)
+		{
+			Fef = (Fepp + 2*Fep + estimated_Fc)/controller_filter_gain + coeff_controller_filter[0]*Feppf + coeff_controller_filter[1]*Fepf;
+			Fepp = Fep;
+			Fep = estimated_Fc;
+			Feppf = Fepf;
+			Fepf = Fef;
+		}
+		else
+		{
+			Fef = estimated_Fc;
+		}
+
 		// jacobian for control
 		robot->J_0(J3d, link_name, pos_in_link);
 		Jv2d = J3d.block(1,0,2,dof);
@@ -409,7 +445,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// -------------------------------------------
 		// if(controller_counter % 500 == 0)
 		// {
-		// 	cout << "Fc : " << estimated_Fc.transpose() << endl;
+		// 	cout << "Fc : " << Fef.transpose() << endl;
 		// 	cout << "rc : " << estimated_rc.transpose() << endl;
 		// 	cout << endl;
 		// }
@@ -421,7 +457,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		controller_counter++;
 
 		// write estimates to file
-		estimate_file << timer.elapsedTime() << '\t' << estimated_Fc.transpose() << '\t' << estimated_rc.transpose() << endl;
+		estimate_file << timer.elapsedTime() << '\t' << Fef.transpose() << '\t' << estimated_rc.transpose() << endl;
 
 		// -------------------------------------------
 		// update last time
@@ -492,9 +528,24 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		real_forces = sensed_force.tail(2);
 		real_contact_position = contact_pos.tail(2);
 
+		// filter forces
+		if(filter_forces)
+		{
+			Frf = (Frpp + 2*Frp + real_forces)/simulation_filter_gain + coeff_simulation_filter[0]*Frppf + coeff_simulation_filter[1]*Frpf;
+			Frpp = Frp;
+			Frp = real_forces;
+			Frppf = Frpf;
+			Frpf = Frf;
+		}
+		else
+		{
+			Frf = real_forces;
+		}
+
+
 		// if(simulation_counter % 1000 == 0)
 		// {
-		// 	cout << "real contact forces : " << real_forces.transpose() << endl;
+		// 	cout << "real contact forces : " << Frf.transpose() << endl;
 		// 	cout << "real contact pos : " << real_contact_position.transpose() << endl;
 		// 	cout << endl;
 		// }
@@ -504,7 +555,7 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// }
 
 		// log real force and position values to file
-		real_file << timer.elapsedTime() << '\t' << real_forces.transpose() << '\t' << real_contact_position.transpose() << endl;
+		real_file << timer.elapsedTime() << '\t' << Frf.transpose() << '\t' << real_contact_position.transpose() << endl;
 
 		//update last time
 		last_time = curr_time;
