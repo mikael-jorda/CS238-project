@@ -6,29 +6,36 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sys
 
-# data file to read given as argument
-if len(sys.argv) < 2:
-	print "Give the name of the file to read as an argument\n"
-	exit()
+# data files to read
+real_file = "real.txt";
+estimate_file = "estimates.txt"
 
-file = np.loadtxt(sys.argv[1] ,skiprows=1)
 
-time = file[:,0]
-commanded_torques = file[:,1:5]
-# cmap = ['r','k']
-# 
+rdata = np.loadtxt(real_file ,skiprows=1)
+edata = np.loadtxt(estimate_file ,skiprows=1)
 
-norm1_torques = abs(commanded_torques)
-total_power = np.sum(commanded_torques,1)
+rtime = rdata[:,0]
+rforce = rdata[:,1:3]
+rpos = rdata[:,3::]
+
+etime = edata[:,0]
+eforce = edata[:,1:3]
+epos = edata[:,3::]
 
 plt.figure(1)
-plt.plot(commanded_torques,label="fgc")
+plt.plot(rtime, rforce[:,0], label="Fry")
+plt.plot(rtime, rforce[:,1], label="Frz")
+plt.plot(etime, eforce[:,0], label="Fey")
+plt.plot(etime, eforce[:,1], label="Fez")
 plt.legend()
 
-plt.figure(2)
-plt.plot(total_power)
-plt.title("Total motor power")
 
+plt.figure(2)
+plt.plot(rtime, rpos[:,0], label="Pry")
+plt.plot(rtime, rpos[:,1], label="Prz")
+plt.plot(etime, epos[:,0], label="Pey")
+plt.plot(etime, epos[:,1], label="Pez")
+plt.legend()
 
 plt.show()
 

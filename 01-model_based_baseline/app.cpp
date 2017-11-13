@@ -8,6 +8,8 @@
 #include "simulation/Sai2Simulation.h"
 #include <dynamics3d.h>
 
+#include <fstream>
+
 #include "force_sensor/ForceSensorSim.h"
 #include "timer/LoopTimer.h"
 
@@ -24,6 +26,10 @@ const string robot_file = "../resources/01-model_based_baseline/4pbot_fixed.urdf
 const string robot_name = "4PBOT";
 
 const string camera_name = "camera_fixed";
+
+const string datafile_estimate = "../../01-model_based_baseline/data_logging/estimates.txt";
+const string datafile_real = "../../01-model_based_baseline/data_logging/real.txt";
+ofstream real_file, estimate_file;
 
 Eigen::Vector3d robot_origin = Eigen::Vector3d(0.0, -1.5, 0.050001);
 
@@ -90,6 +96,12 @@ int main (int argc, char** argv) {
     // set callbacks
 	glfwSetKeyCallback(window, keySelect);
 	glfwSetMouseButtonCallback(window, mouseClick);
+
+	// open files for data logging
+	real_file.open(datafile_real);
+	estimate_file.open(datafile_estimate);
+	estimate_file << "time \t force \t position\n";
+	real_file << "time \t force \t position\n";
 
 	// start the simulation thread first
 	fSimulationRunning = true;
@@ -174,6 +186,10 @@ int main (int argc, char** argv) {
 	fSimulationRunning = false;
 	sim_thread.join();
 	ctrl_thread.join();
+
+	// close files
+	real_file.close();
+	estimate_file.close();
 
     // destroy context
     glfwDestroyWindow(window);
@@ -391,20 +407,21 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		
 
 		// -------------------------------------------
-		if(controller_counter % 500 == 0)
-		{
-			// cout << "mu : " << mu.transpose() << endl;
-			cout << "Fc : " << estimated_Fc.transpose() << endl;
-			cout << "rc : " << estimated_rc.transpose() << endl;
-			// cout << "Ji : " << Ji << endl;
-			cout << endl;
-		}
+		// if(controller_counter % 500 == 0)
+		// {
+		// 	cout << "Fc : " << estimated_Fc.transpose() << endl;
+		// 	cout << "rc : " << estimated_rc.transpose() << endl;
+		// 	cout << endl;
+		// }
 		if(controller_counter == 3000)
 		{
 			gpjs = false;
 		}
 
 		controller_counter++;
+
+		// write estimates to file
+		estimate_file << timer.elapsedTime() << '\t' << estimated_Fc.transpose() << '\t' << estimated_rc.transpose() << endl;
 
 		// -------------------------------------------
 		// update last time
@@ -475,16 +492,19 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		real_forces = sensed_force.tail(2);
 		real_contact_position = contact_pos.tail(2);
 
-		if(simulation_counter % 1000 == 0)
-		{
-			cout << "real contact forces : " << real_forces.transpose() << endl;
-			cout << "real contact pos : " << real_contact_position.transpose() << endl;
-			cout << endl;
-		}
+		// if(simulation_counter % 1000 == 0)
+		// {
+		// 	cout << "real contact forces : " << real_forces.transpose() << endl;
+		// 	cout << "real contact pos : " << real_contact_position.transpose() << endl;
+		// 	cout << endl;
+		// }
 
 		// if (!fTimerDidSleep) {
 		// 	cout << "Warning: timer underflow! dt = 0.001;: " << loop_dt << "\n";
 		// }
+
+		// log real force and position values to file
+		real_file << timer.elapsedTime() << '\t' << real_forces.transpose() << '\t' << real_contact_position.transpose() << endl;
 
 		//update last time
 		last_time = curr_time;
