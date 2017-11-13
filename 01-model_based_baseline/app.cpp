@@ -34,8 +34,8 @@ ofstream real_file, estimate_file;
 Eigen::Vector3d robot_origin = Eigen::Vector3d(0.0, -1.5, 0.050001);
 
 // filtering the force signals
-bool filter_forces = false;
-// bool filter_forces = true;
+// bool filter_forces = false;
+bool filter_forces = true;
 // filter eq : y[n] = (x[n-2] + 2x[n-1] + x[n])/gain + a1*y[n-2] + a2*y[n-1]
 double coeff_controller_filter[2] = {-0.87521, 1.86689}; // assumes control freq = 1kHz, hard coded butterworth filter order 2 15Hz cutoff
 double coeff_simulation_filter[2] = {-0.93553, 1.93338}; // assumes sim freq = 2kHz, hard coded butterworth filter order 2 15Hz cutoff
@@ -419,6 +419,9 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		robot->position(pos3d, link_name, pos_in_link);
 		x = pos3d.tail(2);
 		xdot = Jv2d*robot->_dq;
+
+		double mvt_freq = 0.3;
+		xd(0) = x_init(1) + 0.15*sin(2*M_PI*mvt_freq* time);
 
 		pos_task_force = Lambda*(-kp_pos*(x - xd) - kv_pos*xdot);
 		if(!gpjs)
