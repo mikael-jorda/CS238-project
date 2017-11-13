@@ -68,13 +68,13 @@ int main (int argc, char** argv) {
 	// load simulation world
 	auto sim = new Simulation::Sai2Simulation(world_file, Simulation::urdf, false);
 	sim->setCollisionRestitution(0);
-	sim->setCoeffFrictionStatic(0.6);
+	sim->setCoeffFrictionStatic(0);
 
 	// set initial condition
 	robot->_q << -50.0/180.0*M_PI,
-				 -15.0/180.0*M_PI,
-				 -95.0/180.0*M_PI,
-				  60.0/180.0*M_PI;
+				 -25.0/180.0*M_PI,
+				 -35.0/180.0*M_PI,
+				  10.0/180.0*M_PI;
 	sim->setJointPositions(robot_name, robot->_q);
 	robot->updateModel();
 
@@ -187,6 +187,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	int dof = robot->dof();
 	Eigen::VectorXd command_torques = Eigen::VectorXd::Zero(dof);
 	Eigen::VectorXd gravity_compensation;
+	Eigen::VectorXd nonlinear_terms;
 
 	// joint task
 	Eigen::VectorXd joint_task_torques = Eigen::VectorXd::Zero(dof);
@@ -217,8 +218,31 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	robot->position(x_init, link_name, pos_in_link);
 	Eigen::Vector2d xd = x_init.tail(2);
 
+	// initialize momentum observer
+	Eigen::VectorXd r = Eigen::VectorXd::Zero(dof); 
+	Eigen::VectorXd r_int = Eigen::VectorXd::Zero(dof);
+	Eigen::VectorXd p = Eigen::VectorXd::Zero(dof);
+	Eigen::MatrixXd K0 = Eigen::MatrixXd::Zero(dof,dof);
+	for(int i=0; i<dof; i++)
+	{
+		K0(i,i) = 100.0;
+	}
+	Eigen::VectorXd beta = Eigen::VectorXd::Zero(dof);
+
+	// collision identification
+	Eigen::VectorXd mu = Eigen::VectorXd::Zero(dof);
+	double eps_mu = 0.7;
+	Eigen::Vector3d Fi;
+	int collision_index = 0;
+	Eigen::MatrixXd Ji = Eigen::MatrixXd(3,dof);
+	Eigen::Vector2d estimated_Fc;
+	Eigen::Vector2d estimated_rc;
+	Eigen::Matrix3d Ri3d;
+	Eigen::Matrix2d Ri;
+
 	// create a loop timer
-	double control_freq = 1000;
+	double dt = 0.001;
+	double control_freq = 1/dt;
 	LoopTimer timer;
 	timer.setLoopFrequency(control_freq);   // 1 KHz
 	double last_time = timer.elapsedTime(); //secs
@@ -227,7 +251,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 	unsigned long long controller_counter = 0;
 
-	Eigen::Vector3d sensed_force = Eigen::Vector3d::Zero();
+	// Eigen::Vector3d sensed_force = Eigen::Vector3d::Zero();
 
 	bool gpjs = true;
 	// gpjs = false;
@@ -243,7 +267,83 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		sim->getJointPositions(robot_name, robot->_q);
 		sim->getJointVelocities(robot_name, robot->_dq);
 		robot->updateModel();
+		robot->gravityVector(gravity_compensation);
 
+		// update momentum residual
+		p = robot->_M * robot->_dq;
+		beta = gravity_compensation;   // negelecting coriolis for now
+		r_int += (command_torques - beta + r)*dt;
+		r = K0*(p - r_int);
+
+		// collision identification and isolation
+		mu.setZero();
+		collision_index = 0;
+		for(int i=0; i<dof; i++)
+		{
+			if(r(i) > eps_mu)
+			{
+				mu(i) = r(i);
+				collision_index = i+1;
+			}
+		}
+		switch(collision_index)
+		{
+			// case 1 :
+			// robot->J_0(J3d, "link1", Eigen::Vector3d::Zero());
+			// break;
+
+			// case 2 :
+			// robot->J_0(J3d, "link2", Eigen::Vector3d::Zero());
+			// break;
+
+			case 3 :
+			robot->J_0(J3d, "link3", Eigen::Vector3d::Zero());
+			robot->rotation(Ri3d, "link3");
+			break;
+
+			case 4 :
+			robot->J_0(J3d, "link4", Eigen::Vector3d::Zero());
+			robot->rotation(Ri3d, "link4");
+			break;
+
+			default :
+			J3d.setZero();
+		}
+
+		if(collision_index > 2 and collision_index <= dof)
+		{
+			// define matrices
+			Ri = Ri3d.block(1,1,2,2);
+			Ji = J3d.block(1,0,3,dof);
+			// Ji.block(0,0,2,dof) = J3d.block(1,0,2,dof);
+			// Ji.block(2,0,1,dof) = J3d.block(3,0,1,dof);
+
+			// find equivqlent force at the joint frame
+			Fi = (Ji.transpose()).colPivHouseholderQr().solve(mu);
+
+			// deduce applied force
+			estimated_Fc = Fi.head(2);
+			estimated_Fc = Ri.transpose()*estimated_Fc;
+
+			// find contact point via moment
+			double ry = 0;
+			if(estimated_Fc(0) > 0)
+			{
+				ry = -0.05;
+			}
+			else
+			{
+				ry = 0.05;
+			}
+			double rz = (ry*estimated_Fc(1) - Fi(2))/estimated_Fc(0);
+			estimated_rc << ry, rz;
+
+			// rotate to base frame
+			estimated_rc = Ri*estimated_rc;
+			estimated_Fc = Ri*estimated_Fc;
+		}
+
+		// jacobian for control
 		robot->J_0(J3d, link_name, pos_in_link);
 		Jv2d = J3d.block(1,0,2,dof);
 		robot->operationalSpaceMatrices(Lambda, Jbar, N, Jv2d);
@@ -252,7 +352,6 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		////////////////////////////// Compute joint torques
 		double time = controller_counter/control_freq;
 
-		robot->gravityVector(gravity_compensation);
 
 		//----------- pos task
 		robot->position(pos3d, link_name, pos_in_link);
@@ -286,8 +385,12 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		{
 			// cout << command_torques.transpose() << endl;
 			// cout << 180.0/M_PI*robot->_q.transpose() << endl;
-			// cout << endl;
 			// cout << controller_counter << endl;
+			cout << "mu : " << mu.transpose() << endl;
+			cout << "Fc : " << estimated_Fc.transpose() << endl;
+			cout << "rc : " << estimated_rc.transpose() << endl;
+			cout << "Ji : " << Ji << endl;
+			cout << endl;
 		}
 		if(controller_counter == 3000)
 		{
@@ -329,10 +432,10 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		sim->integrate(loop_dt);
 
 		// if (!fTimerDidSleep) {
-		// 	cout << "Warning: timer underflow! dt: " << loop_dt << "\n";
+		// 	cout << "Warning: timer underflow! dt = 0.001;: " << loop_dt << "\n";
 		// }
 
-		// update last time
+		//update last time
 		last_time = curr_time;
 	}
 

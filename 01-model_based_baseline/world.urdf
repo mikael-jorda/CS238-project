@@ -29,7 +29,7 @@
 	</static_object>
 
 	<static_object name="Obstacle">
-		<origin xyz="0.0 -0.0 0.9" rpy="0 0 0" />
+		<origin xyz="0.0 0.60 0.9" rpy="0 0 0" />
 		<collision>
 	        <origin xyz="-0.02 0.0 0.0" rpy="0 1.5707963267948966 0" />
 	        <geometry>
