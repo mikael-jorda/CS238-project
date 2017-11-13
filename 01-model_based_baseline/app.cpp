@@ -25,6 +25,8 @@ const string robot_name = "4PBOT";
 
 const string camera_name = "camera_fixed";
 
+Eigen::Vector3d robot_origin = Eigen::Vector3d(0.0, -1.5, 0.050001);
+
 // simulation loop
 void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
 void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
@@ -69,6 +71,8 @@ int main (int argc, char** argv) {
 	auto sim = new Simulation::Sai2Simulation(world_file, Simulation::urdf, false);
 	sim->setCollisionRestitution(0);
 	sim->setCoeffFrictionStatic(0);
+
+	
 
 	// set initial condition
 	robot->_q << -50.0/180.0*M_PI,
@@ -239,6 +243,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	Eigen::Vector2d estimated_rc;
 	Eigen::Matrix3d Ri3d;
 	Eigen::Matrix2d Ri;
+	Eigen::Vector3d pos_i3d;
+	Eigen::Vector2d pos_i;
 
 	// create a loop timer
 	double dt = 0.001;
@@ -277,6 +283,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 		// collision identification and isolation
 		mu.setZero();
+		pos_i.setZero();
 		collision_index = 0;
 		for(int i=0; i<dof; i++)
 		{
@@ -299,11 +306,13 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			case 3 :
 			robot->J_0(J3d, "link3", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link3");
+			robot->position(pos_i3d, "link3", Eigen::Vector3d::Zero());
 			break;
 
 			case 4 :
 			robot->J_0(J3d, "link4", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link4");
+			robot->position(pos_i3d, "link4", Eigen::Vector3d::Zero());
 			break;
 
 			default :
@@ -338,8 +347,9 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			double rz = (ry*estimated_Fc(1) - Fi(2))/estimated_Fc(0);
 			estimated_rc << ry, rz;
 
-			// rotate to base frame
-			estimated_rc = Ri*estimated_rc;
+			// transform to base frame
+			pos_i = pos_i3d.tail(2);
+			estimated_rc = robot_origin.tail(2) + pos_i + Ri*estimated_rc;
 			estimated_Fc = Ri*estimated_Fc;
 		}
 
@@ -383,13 +393,10 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// -------------------------------------------
 		if(controller_counter % 500 == 0)
 		{
-			// cout << command_torques.transpose() << endl;
-			// cout << 180.0/M_PI*robot->_q.transpose() << endl;
-			// cout << controller_counter << endl;
-			cout << "mu : " << mu.transpose() << endl;
+			// cout << "mu : " << mu.transpose() << endl;
 			cout << "Fc : " << estimated_Fc.transpose() << endl;
 			cout << "rc : " << estimated_rc.transpose() << endl;
-			cout << "Ji : " << Ji << endl;
+			// cout << "Ji : " << Ji << endl;
 			cout << endl;
 		}
 		if(controller_counter == 3000)
@@ -416,12 +423,24 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	fSimulationRunning = true;
 
+	// real forces and contact point
+	std::string robot_name = "4PBOT";
+	std::string link_name = "link3";
+	std::vector<Eigen::Vector3d> point_list;
+	std::vector<Eigen::Vector3d> force_list;
+	Eigen::Vector3d sensed_force, sensed_moment;
+	Eigen::Vector2d real_forces;
+	Eigen::Vector3d contact_pos;
+	Eigen::Vector2d real_contact_position;
+
 	// create a timer
 	LoopTimer timer;
 	timer.initializeTimer();
 	timer.setLoopFrequency(2000); 
 	double last_time = timer.elapsedTime(); //secs
 	bool fTimerDidSleep = true;
+
+	unsigned long long simulation_counter = 0;
 
 	while (fSimulationRunning) {
 		fTimerDidSleep = timer.waitForNextLoop();
@@ -431,12 +450,46 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		double loop_dt = curr_time - last_time; 
 		sim->integrate(loop_dt);
 
+		// update forces and contact point
+		point_list.clear();
+		force_list.clear();
+		sim->getContactList(
+			point_list,
+			force_list,
+			robot_name,
+			link_name);
+		// zero out current forces
+		sensed_force.setZero();
+		contact_pos.setZero();
+		// if list is empty, simply set forces to 0
+		if(not point_list.empty()) 
+		{
+			// transform to sensor frame
+			for (uint pt_ind=0; pt_ind < point_list.size(); ++pt_ind) 
+			{
+				sensed_force += force_list[pt_ind];
+				contact_pos += point_list[pt_ind];
+			}
+			contact_pos /= point_list.size();
+		}
+		real_forces = sensed_force.tail(2);
+		real_contact_position = contact_pos.tail(2);
+
+		if(simulation_counter % 1000 == 0)
+		{
+			cout << "real contact forces : " << real_forces.transpose() << endl;
+			cout << "real contact pos : " << real_contact_position.transpose() << endl;
+			cout << endl;
+		}
+
 		// if (!fTimerDidSleep) {
 		// 	cout << "Warning: timer underflow! dt = 0.001;: " << loop_dt << "\n";
 		// }
 
 		//update last time
 		last_time = curr_time;
+
+		simulation_counter++;
 	}
 
 	double end_time = timer.elapsedTime();
