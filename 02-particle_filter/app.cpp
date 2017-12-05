@@ -3,6 +3,8 @@
 #include <thread>
 #include <math.h>
 
+#include <QP.h>
+
 #include "model/ModelInterface.h"
 #include "graphics/ChaiGraphics.h"
 #include "simulation/Sai2Simulation.h"
@@ -21,14 +23,14 @@ void sighandler(int){fSimulationRunning = false;}
 
 using namespace std;
 
-const string world_file = "../resources/01-model_based_baseline/world.urdf";
-const string robot_file = "../resources/01-model_based_baseline/4pbot_fixed.urdf";
+const string world_file = "../resources/02-particle_filter/world.urdf";
+const string robot_file = "../resources/02-particle_filter/4pbot_fixed.urdf";
 const string robot_name = "4PBOT";
 
 const string camera_name = "camera_fixed";
 
-const string datafile_estimate = "../../01-model_based_baseline/data_logging/estimates.txt";
-const string datafile_real = "../../01-model_based_baseline/data_logging/real.txt";
+const string datafile_estimate = "../../02-particle_filter/data_logging/estimates.txt";
+const string datafile_real = "../../02-particle_filter/data_logging/real.txt";
 ofstream real_file, estimate_file;
 
 Eigen::Vector3d robot_origin = Eigen::Vector3d(0.0, -1.5, 0.050001);
@@ -271,6 +273,12 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	}
 	Eigen::VectorXd beta = Eigen::VectorXd::Zero(dof);
 
+	// initialize particle filter variables
+	sampleSize = 50;
+	particleSet = Eigen::MatrixXd(sampleSize,3);
+	//epsilon = 
+	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize);
+
 	// collision identification
 	Eigen::VectorXd mu = Eigen::VectorXd::Zero(dof);
 	double eps_mu = 0.7;
@@ -328,68 +336,20 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			if(r(i) > eps_mu)
 			{
 				mu(i) = r(i);
-				collision_index = i+1;
+				collision_index = i+1; //link where the collision happened
 			}
 		}
-		switch(collision_index)
+
+		// sample particles on link surface
+		
+		// compute importance weights
+		for (int i=0; i<=sampleSize; i++)
 		{
-			// case 1 :
-			// robot->J_0(J3d, "link1", Eigen::Vector3d::Zero());
-			// break;
-
-			// case 2 :
-			// robot->J_0(J3d, "link2", Eigen::Vector3d::Zero());
-			// break;
-
-			case 3 :
-			robot->J_0(J3d, "link3", Eigen::Vector3d::Zero());
-			robot->rotation(Ri3d, "link3");
-			robot->position(pos_i3d, "link3", Eigen::Vector3d::Zero());
-			break;
-
-			case 4 :
-			robot->J_0(J3d, "link4", Eigen::Vector3d::Zero());
-			robot->rotation(Ri3d, "link4");
-			robot->position(pos_i3d, "link4", Eigen::Vector3d::Zero());
-			break;
-
-			default :
-			J3d.setZero();
+			epsilon
 		}
 
-		if(collision_index > 2 and collision_index <= dof)
-		{
-			// define matrices
-			Ri = Ri3d.block(1,1,2,2);
-			Ji = J3d.block(1,0,3,dof);
-			// Ji.block(0,0,2,dof) = J3d.block(1,0,2,dof);
-			// Ji.block(2,0,1,dof) = J3d.block(3,0,1,dof);
+		// resample
 
-			// find equivqlent force at the joint frame
-			Fi = (Ji.transpose()).colPivHouseholderQr().solve(mu);
-
-			// deduce applied force
-			estimated_Fc = Fi.head(2);
-			estimated_Fc = Ri.transpose()*estimated_Fc;
-
-			// find contact point via moment
-			double ry = 0;
-			if(estimated_Fc(0) > 0)
-			{
-				ry = -0.05;
-			}
-			else
-			{
-				ry = 0.05;
-			}
-			double rz = (ry*estimated_Fc(1) - Fi(2))/estimated_Fc(0);
-			estimated_rc << ry, rz;
-
-			// transform to base frame
-			pos_i = pos_i3d.tail(2);
-			estimated_rc = robot_origin.tail(2) + pos_i + Ri*estimated_rc;
-			estimated_Fc = Ri*estimated_Fc;
-		}
 
 		// filter forces
 		if(filter_forces)
