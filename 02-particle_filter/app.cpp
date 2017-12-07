@@ -3,7 +3,8 @@
 #include <thread>
 #include <math.h>
 
-#include <QP.h>
+// #include "taco_library/include/taco/optimizer/QP.h"
+// #include "taco_library/include/taco/optimizer/QuadProgRT.h"
 
 #include "model/ModelInterface.h"
 #include "graphics/ChaiGraphics.h"
@@ -241,11 +242,11 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	// position task
 	const string link_name = "link4";
 	const Eigen::Vector3d pos_in_link = Eigen::Vector3d(0.0, 0.0, 1.0);
-	Eigen::MatrixXd J3d, Jv2d, Jw2d, J2d, Lambda, N, Jbar;
+	Eigen::MatrixXd J3d, Jv2d, Jw2d, Lambda, N, Jbar;
+	Eigen::MatrixXd Jr = Eigen::MatrixXd::Zero(6, dof);
 	J3d = Eigen::MatrixXd::Zero(6, dof);
 	Jw2d = Eigen::MatrixXd::Zero(1, dof);
 	Jv2d = Eigen::MatrixXd::Zero(2, dof);
-	J2d = Eigen::MatrixXd::Zero(3, dof);
 	Lambda = Eigen::MatrixXd(2,2);
 	Jbar = Eigen::MatrixXd(dof,2);
 	N = Eigen::MatrixXd(dof,dof);
@@ -273,12 +274,6 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	}
 	Eigen::VectorXd beta = Eigen::VectorXd::Zero(dof);
 
-	// initialize particle filter variables
-	sampleSize = 50;
-	particleSet = Eigen::MatrixXd(sampleSize,3);
-	//epsilon = 
-	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize);
-
 	// collision identification
 	Eigen::VectorXd mu = Eigen::VectorXd::Zero(dof);
 	double eps_mu = 0.7;
@@ -291,6 +286,21 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	Eigen::Matrix2d Ri;
 	Eigen::Vector3d pos_i3d;
 	Eigen::Vector2d pos_i;
+
+	// initialize particle filter variables
+	int sampleSize = 50;
+	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd(sampleSize,3);
+	Eigen::MatrixXd particleSet = Eigen::MatrixXd(sampleSize,3);
+	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize);
+	Eigen::MatrixXd Jparticle, A, B;
+	Eigen::Vector3d Fopt3d;
+	Eigen::Vector2d Fopt;
+	//taco::QuadProgRT* QP = new taco::QuadProgRT();
+
+	// sample particles on link surface
+	Eigen::Vector3d linkDepthVec, error;
+	linkDepthVec << (0,0.005,0);
+	Eigen::Vector3d particleLocation;
 
 	// create a loop timer
 	double dt = 0.001;
@@ -339,13 +349,69 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 				collision_index = i+1; //link where the collision happened
 			}
 		}
+		switch(collision_index)
+		{
+			case 3 :
+			robot->J_0(J3d, "link3", Eigen::Vector3d::Zero());
+			robot->rotation(Ri3d, "link3");
+			robot->position(pos_i3d, "link3", Eigen::Vector3d::Zero());
+			//string currentLink("link3");
+			break;
 
-		// sample particles on link surface
+			case 4 :
+			robot->J_0(J3d, "link4", Eigen::Vector3d::Zero());
+			robot->rotation(Ri3d, "link4");
+			robot->position(pos_i3d, "link4", Eigen::Vector3d::Zero());
+			//string currentLink("link4");
+			break;
+
+			default :
+			J3d.setZero();
+		}
+	
+
+		// initial uniform sampling
+		for (int i=0; i<=sampleSize; i++)
+		{	
+			int sign;
+			if (i % 2 == 0)
+			{
+				sign = 1;
+			}
+			else
+			{
+				sign = -1;
+			}
+			particleLocation << pos_i3d + sign*linkDepthVec + Eigen::Vector3d(0,0,i*1/(sampleSize/2));
+			cout << "Particle : " << particleLocation << endl;
+			particleSetInit.row(i) = particleLocation;
+		}
+
+		// add tiny particle spheres for visualization
 		
 		// compute importance weights
-		for (int i=0; i<=sampleSize; i++)
+		for (int j=0; j<=sampleSize; j++)
 		{
-			epsilon
+			// Eigen::Vector3d particleVec;
+			// particleVec = particleSet.row(j);
+			if(collision_index == 3)
+			{
+		 		robot->J_0(Jparticle, "link3", particleSet.row(j) ); 
+			}
+		 	else
+		 	{
+		 		robot->J_0(Jparticle, "link4", particleSet.row(j)); 
+
+		 	}
+
+		 	//Minimize   FAF+BF
+ 			//Subject to [0 -1 0]*F<=0
+            A = Jparticle * Jparticle.transpose();
+            B = 2 * r.transpose() * Jparticle.transpose();
+            Fopt3d = -2 * A.inverse() * B.transpose();
+            Fopt = Fopt3d.tail(2);
+		 	error = r - Fopt;
+		 	weights(j) = exp(-0.5 * error.norm()); 
 		}
 
 		// resample

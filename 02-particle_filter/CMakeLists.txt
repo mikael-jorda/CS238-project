@@ -1,6 +1,7 @@
 # create an executable
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BRACING2D_BINARY_DIR}/02-particle_filter)
-ADD_EXECUTABLE (app02 app.cpp ${BRACING2D_COMMON_SOURCE})
+ADD_EXECUTABLE (app02 app.cpp ${BRACING2D_COMMON_SOURCE}) # taco_library/include/taco/optimizer/QuadProgRT.cpp)
+#include_directories(taco_library/include)
 
 # and link the library against the executable
 TARGET_LINK_LIBRARIES (app02 ${BRACING2D_COMMON_LIBRARIES})
