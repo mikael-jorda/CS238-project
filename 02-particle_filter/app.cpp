@@ -108,6 +108,24 @@ Eigen::VectorXd resample(Eigen::VectorXd normalizedWeights)
 	return idx;
 }
 
+/**
+ * motionModel()
+ * -------------------------------------------------------
+ * redistribute particles according to normal distribution
+ */
+Eigen::MatrixXd motionModel(Eigen::MatrixXd particleSet) 
+{
+	double numParticles = particleSet.rows();
+	Eigen::MatrixXd movedParticleSet = Eigen::VectorXd::Zero(numParticles);
+
+	for (int i=0; i<=numParticles; i++)
+	{
+		
+	}
+
+	return movedParticleSet;
+}
+
 int main (int argc, char** argv) {
 	cout << "Loading URDF world model file: " << world_file << endl;
 
@@ -324,17 +342,16 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 	// initialize particle filter variables
 	int sampleSize = 50;
-	//double rand4resamp;
-	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd(sampleSize,3);
-	Eigen::MatrixXd particleSet = Eigen::MatrixXd(sampleSize,3);
-	Eigen::MatrixXd particleInfo = Eigen::MatrixXd(sampleSize,4); //contains y,z,weight,force
-	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize,2);
-	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize);
-	Eigen::VectorXd resampledParticleIdx = Eigen::VectorXd::Zero(sampleSize);
+	int extraSamples = 20;
+	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd(sampleSize+extraSamples,3);
+	Eigen::MatrixXd particleSet = Eigen::MatrixXd(sampleSize+extraSamples,3);
+	Eigen::MatrixXd particleInfo = Eigen::MatrixXd(sampleSize+extraSamples,4); //contains y,z,weight,force
+	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,2);
+	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize+extraSamples);
+	Eigen::VectorXd resampledParticleIdx = Eigen::VectorXd::Zero(sampleSize+extraSamples);
 	Eigen::MatrixXd Jparticle, A, B;
 	Eigen::Vector3d Fopt3d;
-	Eigen::Vector2d Fopt;
-	//taco::QuadProgRT* QP = new taco::QuadProgRT();
+	Eigen::Vector2d Fopt2d;
 
 	// sample particles on link surface
 	Eigen::Vector3d linkDepthVec, error;
@@ -408,72 +425,39 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			J3d.setZero();
 		}
 	
-		// initial uniform sampling
-		for (int i=0; i<=sampleSize; i++)
-		{	
-			int sign;
-			if (i % 2 == 0)
+		if(collision_index > 2 and collision_index <= dof)
+		{
+			// define matrices
+			Ri = Ri3d.block(1,1,2,2);
+			Ji = J3d.block(1,0,3,dof);
+			// Ji.block(0,0,2,dof) = J3d.block(1,0,2,dof);
+			// Ji.block(2,0,1,dof) = J3d.block(3,0,1,dof);
+
+			// find equivqlent force at the joint frame
+			Fi = (Ji.transpose()).colPivHouseholderQr().solve(mu);
+
+			// deduce applied force
+			estimated_Fc = Fi.head(2);
+			estimated_Fc = Ri.transpose()*estimated_Fc;
+
+			// find contact point via moment
+			double ry = 0;
+			if(estimated_Fc(0) > 0)
 			{
-				sign = 1;
+				ry = -0.05;
 			}
 			else
 			{
-				sign = -1;
+				ry = 0.05;
 			}
-			particleLocation << pos_i3d + sign*linkDepthVec + Eigen::Vector3d(0,0,i*1/(sampleSize/2));
-			cout << "Particle : " << particleLocation << endl;
-			particleSetInit.row(i) = particleLocation;
+			double rz = (ry*estimated_Fc(1) - Fi(2))/estimated_Fc(0);
+			estimated_rc << ry, rz;
+
+			// transform to base frame
+			pos_i = pos_i3d.tail(2);
+			estimated_rc = robot_origin.tail(2) + pos_i + Ri*estimated_rc;
+			estimated_Fc = Ri*estimated_Fc;
 		}
-		
-		// Use initial particle set or normally distributed samples
-		if (resampledParticleSet.isZero())
-		{
-			particleSet = particleSetInit;
-		}
-		else // move resampled particles according to normal distribution
-		{
-
-		}
-
-		// compute importance weights
-		for (int j=0; j<=sampleSize; j++)
-		{
-			Eigen::Vector3d particleVec;
-			particleVec = particleSet.row(j);
-
-			if(collision_index == 3)
-			{
-		 		robot->J_0(Jparticle, "link3", particleSet.row(j)); 
-			}
-		 	else
-		 	{
-		 		robot->J_0(Jparticle, "link4", particleSet.row(j)); 
-
-		 	}
-
-		 	//Minimize   FAF+BF
-            A = Jparticle * Jparticle.transpose();
-            B = 2 * r.transpose() * Jparticle.transpose();
-            Fopt3d = -2 * A.inverse() * B.transpose();
-            Fopt = Fopt3d.tail(2);
-            //Subject to [0 -1 0]*F<=0
-            if((Fopt(1) > 0 && particleVec(2) < 0) || (Fopt(1) < 0 && particleVec(2) > 0))
-            {
-            	error = r - Fopt;
-			 	weights(j) = exp(-0.5 * error.norm()); 	
-            }
-            else
-            {
-	         	weights(j) = 0; //discard particles that give an F in the wrong half plane   
-            }	
-		}
-
-		// normalize weights
-		weights = weights/ weights.norm();
-		
-		// resample
-		resampledParticleIdx = resample(weights);
-
 
 		// filter forces
 		if(filter_forces)
@@ -493,6 +477,80 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		robot->J_0(J3d, link_name, pos_in_link);
 		Jv2d = J3d.block(1,0,2,dof);
 		robot->operationalSpaceMatrices(Lambda, Jbar, N, Jv2d);
+
+		// -------------------------------------------
+		////////////////////////////// Particle Filter
+
+		// initial uniform sampling
+		for (int i=0; i<sampleSize + extraSamples; i++)
+		{	
+			int sign;
+			if (i % 2 == 0)
+			{
+				sign = 1;
+			}
+			else
+			{
+				sign = -1;
+			}
+			particleLocation << Ri3d.transpose()*pos_i3d + sign*linkDepthVec + Eigen::Vector3d(0,0,i*1/(sampleSize/2));  // CHECK 
+			cout << "Particle : " << particleLocation << endl;
+			particleSetInit.row(i) = particleLocation;
+		}
+		
+		// use initial uniform particle set or motion model for the next time step
+		if (resampledParticleSet.isZero())
+		{
+			particleSet = particleSetInit;
+		}
+		else // move resampled particles according to normal distribution
+		{
+			particleSet = motionModel(resampledParticleSet);
+		}
+
+		// compute importance weights
+		for (int j=0; j<sampleSize + extraSamples; j++)
+		{
+			Eigen::Vector3d particleVec;
+			particleVec = particleSet.row(j);
+
+			if(collision_index == 3) //find the jacobian for the current particle location
+			{
+		 		robot->J_0(Jparticle, "link3", particleSet.row(j)); 
+			}
+		 	else
+		 	{
+		 		robot->J_0(Jparticle, "link4", particleSet.row(j)); 
+
+		 	}
+
+		 	//Minimize   FAF+BF
+            A = Jparticle * Jparticle.transpose();
+            B = 2 * r.transpose() * Jparticle.transpose();
+            Fopt3d = -2 * A.inverse() * B.transpose();
+            Fopt2d = Fopt3d.tail(2);
+            //Subject to [0 -1 0]*F<=0
+            if((Fopt2d(1) > 0 && particleVec(2) < 0) || (Fopt2d(1) < 0 && particleVec(2) > 0))
+            {
+            	error = r - Fopt2d;  // CHECK estimated_Fc
+			 	weights(j) = exp(-0.5 * error.norm()); 	
+            }
+            else
+            {
+	         	weights(j) = 0; //discard particles that give an F in the wrong half plane   
+            }	
+		}
+
+		// normalize weights
+		weights = weights/ weights.norm();
+		
+		// resample
+		resampledParticleIdx = resample(weights);
+
+		for (int i=0; i<sampleSize + extraSamples; i++)
+		{
+			resampledParticleSet.row(i) = particleSet.row(resampledParticleIdx(i));
+		}
 
 		// -------------------------------------------
 		////////////////////////////// Compute joint torques
