@@ -73,6 +73,41 @@ bool fTransZp = false;
 bool fTransZn = false;
 bool fRotPanTilt = false;
 
+/**
+ * resample()
+ * ----------------------------------------------------
+ * multimodal resampling
+ */
+Eigen::VectorXd resample(Eigen::VectorXd normalizedWeights) 
+{
+	double numParticles = normalizedWeights.size();
+	Eigen::VectorXd idx = Eigen::VectorXd::Zero(numParticles);
+	Eigen::VectorXd cumSumWeights = Eigen::VectorXd::Zero(numParticles);
+	int k = 0;
+
+	cumSumWeights(0) = normalizedWeights(0); 
+	for (int j=1; j<=numParticles; j++)
+	{
+		cumSumWeights(j) = cumSumWeights(j-1) + normalizedWeights(j);
+	}
+	cout << "cumulative sum: " << cumSumWeights << endl;
+
+	for (int i=0; i<=numParticles; i++)
+	{
+		// generate random number between 0 and 1
+		double rand4resamp = ((double) rand() / (RAND_MAX));
+
+		while(cumSumWeights(k)<rand4resamp)
+		{
+			k++;
+		}
+
+		idx(i) = k;
+	}
+
+	return idx;
+}
+
 int main (int argc, char** argv) {
 	cout << "Loading URDF world model file: " << world_file << endl;
 
@@ -289,12 +324,13 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 	// initialize particle filter variables
 	int sampleSize = 50;
-	double rand4resamp;
+	//double rand4resamp;
 	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd(sampleSize,3);
 	Eigen::MatrixXd particleSet = Eigen::MatrixXd(sampleSize,3);
 	Eigen::MatrixXd particleInfo = Eigen::MatrixXd(sampleSize,4); //contains y,z,weight,force
 	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize,2);
 	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize);
+	Eigen::VectorXd resampledParticleIdx = Eigen::VectorXd::Zero(sampleSize);
 	Eigen::MatrixXd Jparticle, A, B;
 	Eigen::Vector3d Fopt3d;
 	Eigen::Vector2d Fopt;
@@ -434,9 +470,9 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 		// normalize weights
 		weights = weights/ weights.norm();
-		// generate random number between 0 and 1
-		rand4resamp = ((double) rand() / (RAND_MAX));
-		// Organize particle info matrix by weight
+		
+		// resample
+		resampledParticleIdx = resample(weights);
 
 
 		// filter forces
