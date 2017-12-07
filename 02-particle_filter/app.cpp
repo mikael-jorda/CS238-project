@@ -289,8 +289,11 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 	// initialize particle filter variables
 	int sampleSize = 50;
+	double rand4resamp;
 	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd(sampleSize,3);
 	Eigen::MatrixXd particleSet = Eigen::MatrixXd(sampleSize,3);
+	Eigen::MatrixXd particleInfo = Eigen::MatrixXd(sampleSize,4); //contains y,z,weight,force
+	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize,2);
 	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize);
 	Eigen::MatrixXd Jparticle, A, B;
 	Eigen::Vector3d Fopt3d;
@@ -369,7 +372,6 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			J3d.setZero();
 		}
 	
-
 		// initial uniform sampling
 		for (int i=0; i<=sampleSize; i++)
 		{	
@@ -386,17 +388,26 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			cout << "Particle : " << particleLocation << endl;
 			particleSetInit.row(i) = particleLocation;
 		}
-
-		// add tiny particle spheres for visualization
 		
+		// Use initial particle set or normally distributed samples
+		if (resampledParticleSet.isZero())
+		{
+			particleSet = particleSetInit;
+		}
+		else // move resampled particles according to normal distribution
+		{
+
+		}
+
 		// compute importance weights
 		for (int j=0; j<=sampleSize; j++)
 		{
-			// Eigen::Vector3d particleVec;
-			// particleVec = particleSet.row(j);
+			Eigen::Vector3d particleVec;
+			particleVec = particleSet.row(j);
+
 			if(collision_index == 3)
 			{
-		 		robot->J_0(Jparticle, "link3", particleSet.row(j) ); 
+		 		robot->J_0(Jparticle, "link3", particleSet.row(j)); 
 			}
 		 	else
 		 	{
@@ -405,16 +416,27 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		 	}
 
 		 	//Minimize   FAF+BF
- 			//Subject to [0 -1 0]*F<=0
             A = Jparticle * Jparticle.transpose();
             B = 2 * r.transpose() * Jparticle.transpose();
             Fopt3d = -2 * A.inverse() * B.transpose();
             Fopt = Fopt3d.tail(2);
-		 	error = r - Fopt;
-		 	weights(j) = exp(-0.5 * error.norm()); 
+            //Subject to [0 -1 0]*F<=0
+            if((Fopt(1) > 0 && particleVec(2) < 0) || (Fopt(1) < 0 && particleVec(2) > 0))
+            {
+            	error = r - Fopt;
+			 	weights(j) = exp(-0.5 * error.norm()); 	
+            }
+            else
+            {
+	         	weights(j) = 0; //discard particles that give an F in the wrong half plane   
+            }	
 		}
 
-		// resample
+		// normalize weights
+		weights = weights/ weights.norm();
+		// generate random number between 0 and 1
+		rand4resamp = ((double) rand() / (RAND_MAX));
+		// Organize particle info matrix by weight
 
 
 		// filter forces
