@@ -47,6 +47,11 @@ double simulation_filter_gain = 1.861608837e+03;
 Eigen::Vector2d Fepp, Fep, Feppf, Fepf, Fef;
 Eigen::Vector2d Frpp, Frp, Frppf, Frpf, Frf;
 
+bool in_contact = false;
+
+int sampleSize = 50;
+int extraSamples = 0;
+Eigen::MatrixXd particleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
 
 // simulation loop
 void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
@@ -86,18 +91,19 @@ Eigen::VectorXd resample(Eigen::VectorXd normalizedWeights)
 	int k = 0;
 
 	cumSumWeights(0) = normalizedWeights(0); 
-	for (int j=1; j<=numParticles; j++)
+	for (int j=1; j<numParticles; j++)
 	{
 		cumSumWeights(j) = cumSumWeights(j-1) + normalizedWeights(j);
 	}
-	cout << "cumulative sum: " << cumSumWeights << endl;
+	// cout << "cumulative sum: " << cumSumWeights << endl;
 
-	for (int i=0; i<=numParticles; i++)
+	for (int i=0; i<numParticles; i++)
 	{
 		// generate random number between 0 and 1
 		double rand4resamp = ((double) rand() / (RAND_MAX));
 
-		while(cumSumWeights(k)<rand4resamp)
+		k = 0;
+		while(cumSumWeights(k)<rand4resamp && k < numParticles-1)
 		{
 			k++;
 		}
@@ -116,11 +122,11 @@ Eigen::VectorXd resample(Eigen::VectorXd normalizedWeights)
 Eigen::MatrixXd motionModel(Eigen::MatrixXd particleSet) 
 {
 	double numParticles = particleSet.rows();
-	Eigen::MatrixXd movedParticleSet = Eigen::VectorXd::Zero(numParticles);
-	Eigen::VectorXd particleLocation;
+	Eigen::MatrixXd movedParticleSet = Eigen::MatrixXd::Zero(numParticles,3);
+	Eigen::Vector3d particleLocation;
 	float normalSample;
 
-	for (int i=0; i<=numParticles; i++)
+	for (int i=0; i<numParticles; i++)
 	{
 		// random device class instance, source of 'true' randomness for initializing random seed
 	    random_device rd; 
@@ -138,7 +144,7 @@ Eigen::MatrixXd motionModel(Eigen::MatrixXd particleSet)
         normalSample = d(gen); 
 
         // save location
-        movedParticleSet.row(i) << (0,particleLocation(1),normalSample);
+        movedParticleSet.row(i) << 0, particleLocation(1), normalSample;
 	}
 
 	return movedParticleSet;
@@ -156,6 +162,16 @@ int main (int argc, char** argv) {
 	auto graphics = new Graphics::ChaiGraphics(world_file, Graphics::urdf, false);
 	Eigen::Vector3d camera_pos, camera_lookat, camera_vertical;
 	graphics->getCameraPose(camera_name, camera_pos, camera_vertical, camera_lookat);
+
+	vector<chai3d::cShapeSphere*> graphic_particles;
+	for(int i=0; i < sampleSize + extraSamples; i++)
+	{
+		graphic_particles.push_back(new chai3d::cShapeSphere(0.05));
+		graphic_particles[i]->m_material->setColorf(1.0,0.0,0.0);
+		graphics->_world->addChild(graphic_particles[i]);
+	}
+
+
 	// load robots
 	auto robot = new Model::ModelInterface(robot_file, Model::rbdl, Model::urdf, false);
 
@@ -210,6 +226,17 @@ int main (int argc, char** argv) {
     while (!glfwWindowShouldClose(window)) {
 		// update kinematic models
 		// robot->updateModel();
+
+		Eigen::Vector3d link_origin = Eigen::Vector3d::Zero();
+		Eigen::Matrix3d Rlink = Eigen::Matrix3d::Identity();
+		robot->position(link_origin, "link3", Eigen::Vector3d::Zero(3));
+		robot->rotation(Rlink, "link3");
+
+    	for(int i=0; i< sampleSize+extraSamples; i++)
+    	{
+    		Eigen::Vector3d tmp = particleSet.row(i);
+			graphic_particles[i]->setLocalPos(robot_origin + link_origin + Rlink*tmp);
+    	}
 
 		// update graphics. this automatically waits for the correct amount of time
 		int width, height;
@@ -350,20 +377,19 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	double eps_mu = 0.7;
 	Eigen::Vector3d Fi;
 	int collision_index = 0;
-	Eigen::MatrixXd Ji = Eigen::MatrixXd(3,dof);
+	// Eigen::MatrixXd Ji = Eigen::MatrixXd(3,dof);
 	Eigen::Vector2d estimated_Fc;
 	Eigen::Vector2d estimated_rc;
 	Eigen::Matrix3d Ri3d;
-	Eigen::Matrix2d Ri;
+	// Eigen::Matrix2d Ri;
 	Eigen::Vector3d pos_i3d;
-	Eigen::Vector2d pos_i;
+	// Eigen::Vector2d pos_i;
 
 	// initialize particle filter variables
-	int sampleSize = 50;
-	int extraSamples = 20;
+
 	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
-	Eigen::MatrixXd particleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
-	Eigen::MatrixXd particleInfo = Eigen::MatrixXd::Zero(sampleSize+extraSamples,4); //contains y,z,weight,force
+	Eigen::MatrixXd particleForce = Eigen::MatrixXd::Zero(sampleSize+extraSamples,2);
+	// Eigen::MatrixXd particleInfo = Eigen::MatrixXd::Zero(sampleSize+extraSamples,4); //contains y,z,weight,force
 	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
 	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize+extraSamples);
 	Eigen::VectorXd resampledParticleIdx = Eigen::VectorXd::Zero(sampleSize+extraSamples);
@@ -372,9 +398,30 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	Eigen::Vector2d Fopt2d;
 
 	// sample particles on link surface
-	Eigen::Vector3d linkDepthVec, error;
-	linkDepthVec << (0,0.005,0);
+	Eigen::Vector3d linkDepthVec;
+	Eigen::VectorXd error = Eigen::VectorXd::Zero(4);
+	linkDepthVec << 0,0.05,0;
 	Eigen::Vector3d particleLocation;
+
+	// initial uniform sampling
+	for (int i=0; i<sampleSize; i++)
+	{	
+		int sign;
+		if (i % 2 == 0)
+		{
+			sign = 1;
+		}
+		else
+		{
+			sign = -1;
+		}
+		particleLocation << sign*linkDepthVec + Eigen::Vector3d(0,0,(double)i/(sampleSize)); 
+		// cout << "Particle : " << particleLocation << endl;
+		particleSetInit.row(i) = particleLocation;
+	}
+	// particleSet = particleSetInit;
+
+	// cout << particleSetInit << endl;
 
 	// create a loop timer
 	double dt = 0.001;
@@ -413,7 +460,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 		// collision identification and isolation
 		mu.setZero();
-		pos_i.setZero();
+		// pos_i.setZero();
 		collision_index = 0;
 		for(int i=0; i<dof; i++)
 		{
@@ -426,96 +473,71 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		switch(collision_index)
 		{
 			case 3 :
-			robot->J_0(J3d, "link3", Eigen::Vector3d::Zero());
+			in_contact = true;
+			// robot->J_0(J3d, "link3", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link3");
 			robot->position(pos_i3d, "link3", Eigen::Vector3d::Zero());
 			//string currentLink("link3");
 			break;
 
 			case 4 :
-			robot->J_0(J3d, "link4", Eigen::Vector3d::Zero());
+			in_contact = true;
+			// robot->J_0(J3d, "link4", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link4");
 			robot->position(pos_i3d, "link4", Eigen::Vector3d::Zero());
 			//string currentLink("link4");
 			break;
 
 			default :
+			in_contact = false;
 			J3d.setZero();
 		}
 	
-		if(collision_index > 2 and collision_index <= dof)
-		{
-			// define matrices
-			Ri = Ri3d.block(1,1,2,2);
-			Ji = J3d.block(1,0,3,dof);
-			// Ji.block(0,0,2,dof) = J3d.block(1,0,2,dof);
-			// Ji.block(2,0,1,dof) = J3d.block(3,0,1,dof);
+		// cout << "line 447 " << endl;
 
-			// find equivqlent force at the joint frame
-			Fi = (Ji.transpose()).colPivHouseholderQr().solve(mu);
+		// if(collision_index > 2 and collision_index <= dof)
+		// {
+		// 	// define matrices
+		// 	Ri = Ri3d.block(1,1,2,2);
+		// 	Ji = J3d.block(1,0,3,dof);
+		// 	// Ji.block(0,0,2,dof) = J3d.block(1,0,2,dof);
+		// 	// Ji.block(2,0,1,dof) = J3d.block(3,0,1,dof);
 
-			// deduce applied force
-			estimated_Fc = Fi.head(2);
-			estimated_Fc = Ri.transpose()*estimated_Fc;
+		// 	// find equivqlent force at the joint frame
+		// 	Fi = (Ji.transpose()).colPivHouseholderQr().solve(mu);
 
-			// find contact point via moment
-			double ry = 0;
-			if(estimated_Fc(0) > 0)
-			{
-				ry = -0.05;
-			}
-			else
-			{
-				ry = 0.05;
-			}
-			double rz = (ry*estimated_Fc(1) - Fi(2))/estimated_Fc(0);
-			estimated_rc << ry, rz;
+		// 	// deduce applied force
+		// 	estimated_Fc = Fi.head(2);
+		// 	estimated_Fc = Ri.transpose()*estimated_Fc;
 
-			// transform to base frame
-			pos_i = pos_i3d.tail(2);
-			estimated_rc = robot_origin.tail(2) + pos_i + Ri*estimated_rc;
-			estimated_Fc = Ri*estimated_Fc;
-		}
+		// 	// find contact point via moment
+		// 	double ry = 0;
+		// 	if(estimated_Fc(0) > 0)
+		// 	{
+		// 		ry = -0.05;
+		// 	}
+		// 	else
+		// 	{
+		// 		ry = 0.05;
+		// 	}
+		// 	double rz = (ry*estimated_Fc(1) - Fi(2))/estimated_Fc(0);
+		// 	estimated_rc << ry, rz;
 
-		// filter forces
-		if(filter_forces)
-		{
-			Fef = (Fepp + 2*Fep + estimated_Fc)/controller_filter_gain + coeff_controller_filter[0]*Feppf + coeff_controller_filter[1]*Fepf;
-			Fepp = Fep;
-			Fep = estimated_Fc;
-			Feppf = Fepf;
-			Fepf = Fef;
-		}
-		else
-		{
-			Fef = estimated_Fc;
-		}
+		// 	// transform to base frame
+		// 	pos_i = pos_i3d.tail(2);
+		// 	estimated_rc = robot_origin.tail(2) + pos_i + Ri*estimated_rc;
+		// 	estimated_Fc = Ri*estimated_Fc;
+		// }
 
-		// jacobian for control
-		robot->J_0(J3d, link_name, pos_in_link);
-		Jv2d = J3d.block(1,0,2,dof);
-		robot->operationalSpaceMatrices(Lambda, Jbar, N, Jv2d);
+
 
 		// -------------------------------------------
 		////////////////////////////// Particle Filter
 
-		// initial uniform sampling
-		for (int i=0; i<sampleSize; i++)
-		{	
-			int sign;
-			if (i % 2 == 0)
-			{
-				sign = 1;
-			}
-			else
-			{
-				sign = -1;
-			}
-			particleLocation << Ri3d.transpose()*pos_i3d + sign*linkDepthVec + Eigen::Vector3d(0,0,i*1/(sampleSize/2));  // CHECK 
-			cout << "Particle : " << particleLocation << endl;
-			particleSetInit.row(i) = particleLocation;
-		}
-		
+
+		if(in_contact)
+		{
+
 		// use initial uniform particle set or motion model for the next time step
 		if (resampledParticleSet.isZero())
 		{
@@ -538,7 +560,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			{
 				sign = -1;
 			}
-			particleLocation << Ri3d.transpose()*pos_i3d + sign*linkDepthVec + Eigen::Vector3d(0,0,i*1/(sampleSize/2));  // CHECK 
+			// particleLocation << Ri3d.transpose()*pos_i3d + sign*linkDepthVec + Eigen::Vector3d(0,0,i*1/(sampleSize/2));  // CHECK 
+			particleLocation << sign*linkDepthVec + Eigen::Vector3d(0,0,(double)(i - sampleSize)/(extraSamples)); 
 			particleSet.row(i) = particleLocation;
 		}
 
@@ -550,34 +573,41 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 			if(collision_index == 3) //find the jacobian for the current particle location
 			{
-		 		robot->J_0(Jparticle, "link3", particleSet.row(j)); 
+		 		robot->Jv(Jparticle, "link3", particleVec); 
 			}
 		 	else
 		 	{
-		 		robot->J_0(Jparticle, "link4", particleSet.row(j)); 
+		 		robot->Jv(Jparticle, "link4", particleVec); 
 
 		 	}
 
 		 	//Minimize   FAF+BF
-            A = Jparticle * Jparticle.transpose();
-            B = 2 * r.transpose() * Jparticle.transpose();
-            Fopt3d = -2 * A.inverse() * B.transpose();
+            // A = Jparticle * Jparticle.transpose();
+            // B = 2 * r.transpose() * Jparticle.transpose();
+            // Fopt3d = -2 * A.inverse() * B.transpose();
+
+			Fopt3d = (Jparticle.transpose()).colPivHouseholderQr().solve(r);
+			// Fopt3d.setZero();
             Fopt2d = Fopt3d.tail(2);
+            particleForce.row(j) = Fopt2d;
+
+            // Eigen::Vector3d Flocframe = Ri3d.transpose()*Fopt3d;
             
             //Subject to [0 -1 0]*F<=0
-            if((Fopt2d(1) > 0 && particleVec(2) < 0) || (Fopt2d(1) < 0 && particleVec(2) > 0))
-            {
-            	error = r - Fopt2d;  // CHECK estimated_Fc
-			 	weights(j) = exp(-0.5 * error.norm()); 	
-            }
-            else
-            {
-	         	weights(j) = 0; //discard particles that give an F in the wrong half plane   
-            }	
+            // if((Flocframe(1) > 0 && particleVec(1) < 0) || (Flocframe(1) < 0 && particleVec(1) > 0))
+            // {
+            	error = (r - Jparticle.transpose()*Fopt3d);  
+            	// error.setZero();  
+			 	weights(j) = exp(-0.5 * error.norm()*error.norm()); 	
+            // }
+            // else
+            // {
+	         	// weights(j) = 0; //discard particles that give an F in the wrong half plane   
+            // }	
 		}
 
 		// normalize weights
-		weights = weights/ weights.norm();
+		weights = weights/ weights.sum();
 		
 		// resample
 		resampledParticleIdx = resample(weights);
@@ -587,7 +617,40 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			resampledParticleSet.row(i) = particleSet.row(resampledParticleIdx(i));
 		}
 
+		// select the average
+		Eigen::Vector3d estimated_rc_3d = resampledParticleSet.colwise().mean();
+		estimated_rc_3d = robot_origin + pos_i3d + Ri3d*estimated_rc_3d;
+		estimated_rc = estimated_rc_3d.tail(2);
+		// estimated_rc.setZero();
+		estimated_Fc = particleForce.colwise().mean();
+		}
+		else
+		{
+			particleSet = particleSetInit;
+			resampledParticleSet.setZero();
+			estimated_Fc.setZero();
+			estimated_rc.setZero();
+		}
+
+		// filter forces
+		if(filter_forces)
+		{
+			Fef = (Fepp + 2*Fep + estimated_Fc)/controller_filter_gain + coeff_controller_filter[0]*Feppf + coeff_controller_filter[1]*Fepf;
+			Fepp = Fep;
+			Fep = estimated_Fc;
+			Feppf = Fepf;
+			Fepf = Fef;
+		}
+		else
+		{
+			Fef = estimated_Fc;
+		}
+
 		// -------------------------------------------
+		// jacobian for control
+		robot->J_0(J3d, link_name, pos_in_link);
+		Jv2d = J3d.block(1,0,2,dof);
+		robot->operationalSpaceMatrices(Lambda, Jbar, N, Jv2d);
 		////////////////////////////// Compute joint torques
 		double time = controller_counter/control_freq;
 
@@ -629,7 +692,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// 	cout << "rc : " << estimated_rc.transpose() << endl;
 		// 	cout << endl;
 		// }
-		if(controller_counter == 3000)
+		// if(controller_counter == 3000)
+		if(timer.elapsedTime() >= 1)
 		{
 			gpjs = false;
 		}
@@ -659,6 +723,7 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	// real forces and contact point
 	std::string robot_name = "4PBOT";
 	std::string link_name = "link3";
+	// std::string link_name = "link4";
 	std::vector<Eigen::Vector3d> point_list;
 	std::vector<Eigen::Vector3d> force_list;
 	Eigen::Vector3d sensed_force, sensed_moment;
