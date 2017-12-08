@@ -662,30 +662,31 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			 		robot->Jv(Jparticle, "link4", particleVec); 
 
 			 	}
-
+			 	// Eigen::MatrixXd Jparticle_2d = Jparticle.block(1,0,2,dof);
 			 	//Minimize   FAF+BF
 	            // A = Jparticle * Jparticle.transpose();
 	            // B = 2 * r.transpose() * Jparticle.transpose();
 	            // Fopt3d = -2 * A.inverse() * B.transpose();
 
 				Fopt3d = (Jparticle.transpose()).colPivHouseholderQr().solve(r);
+				// Fopt2d = (Jparticle_2d.transpose()).colPivHouseholderQr().solve(r);
 				// Fopt3d.setZero();
 	            Fopt2d = Fopt3d.tail(2);
 	            particleForce.row(j) = Fopt2d;
 
-	            // Eigen::Vector3d Flocframe = Ri3d.transpose()*Fopt3d;
+	            Eigen::Vector3d Flocframe = Ri3d.transpose()*Fopt3d;
 	            
 	            //Subject to [0 -1 0]*F<=0
-	            // if((Flocframe(1) > 0 && particleVec(1) < 0) || (Flocframe(1) < 0 && particleVec(1) > 0))
-	            // {
+	            if((Flocframe(1) > 0 && particleVec(1) < 0) || (Flocframe(1) < 0 && particleVec(1) > 0))
+	            {
 	            	error = (r - Jparticle.transpose()*Fopt3d);  
 	            	// error.setZero();  
 				 	weights(j) = exp(-0.5 * error.norm()*error.norm()); 	
-	            // }
-	            // else
-	            // {
-		         	// weights(j) = 0; //discard particles that give an F in the wrong half plane   
-	            // }	
+	            }
+	            else
+	            {
+		         	weights(j) = 0; //discard particles that give an F in the wrong half plane   
+	            }	
 			}
 
 			// normalize weights
