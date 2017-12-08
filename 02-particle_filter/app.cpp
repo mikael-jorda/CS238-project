@@ -32,7 +32,8 @@ const string camera_name = "camera_fixed";
 
 const string datafile_estimate = "../../02-particle_filter/data_logging/estimates.txt";
 const string datafile_real = "../../02-particle_filter/data_logging/real.txt";
-ofstream real_file, estimate_file;
+const string datafile_ee_position = "../../02-particle_filter/data_logging/pos.txt";
+ofstream real_file, estimate_file, position_file;
 
 Eigen::Vector3d robot_origin = Eigen::Vector3d(0.0, -1.5, 0.050001);
 
@@ -40,9 +41,11 @@ Eigen::Vector3d robot_origin = Eigen::Vector3d(0.0, -1.5, 0.050001);
 // bool filter_forces = false;
 bool filter_forces = true;
 // filter eq : y[n] = (x[n-2] + 2x[n-1] + x[n])/gain + a1*y[n-2] + a2*y[n-1]
-double coeff_controller_filter[2] = {-0.87521, 1.86689}; // assumes control freq = 1kHz, hard coded butterworth filter order 2 15Hz cutoff
+double coeff_filter[2] = {-0.27221494, 0.74778918}; // assumes particle filter runs at freq = 100Hz, hard coded butterworth filter order 2 15Hz cutoff
+// double coeff_controller_filter[2] = {-0.87521, 1.86689}; // assumes control freq = 1kHz, hard coded butterworth filter order 2 15Hz cutoff
 double coeff_simulation_filter[2] = {-0.93553, 1.93338}; // assumes sim freq = 2kHz, hard coded butterworth filter order 2 15Hz cutoff
-double controller_filter_gain = 4.806381793e+02;
+double filter_gain = 7.627390386010024;
+// double controller_filter_gain = 4.806381793e+02;
 double simulation_filter_gain = 1.861608837e+03;
 Eigen::Vector2d Fepp, Fep, Feppf, Fepf, Fef;
 Eigen::Vector2d Frpp, Frp, Frppf, Frpf, Frf;
@@ -54,10 +57,13 @@ bool contact_detected = false;
 int sampleSize = 50;
 int extraSamples = 0;
 Eigen::MatrixXd particleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
+Eigen::VectorXd r_filter = Eigen::VectorXd::Zero(4);
+
 
 // simulation loop
 void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
 void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
+void particle_filter(Model::ModelInterface* robot);
 
 // initialize window manager
 GLFWwindow* glfwInitialize();
@@ -168,7 +174,7 @@ int main (int argc, char** argv) {
 	vector<chai3d::cShapeSphere*> graphic_particles;
 	for(int i=0; i < sampleSize + extraSamples; i++)
 	{
-		graphic_particles.push_back(new chai3d::cShapeSphere(0.05));
+		graphic_particles.push_back(new chai3d::cShapeSphere(0.03));
 		graphic_particles[i]->m_material->setColorf(1.0,0.0,0.0);
 		graphics->_world->addChild(graphic_particles[i]);
 	}
@@ -227,8 +233,10 @@ int main (int argc, char** argv) {
 	// open files for data logging
 	real_file.open(datafile_real);
 	estimate_file.open(datafile_estimate);
+	position_file.open(datafile_ee_position);
 	estimate_file << "time \t force \t position\n";
 	real_file << "time \t force \t position\n";
+	position_file << "time \t desired_ee_pos \t ee_pos\n";
 
 	// initialize filter variables
 	Fepp.setZero();
@@ -259,6 +267,9 @@ int main (int argc, char** argv) {
 	// next start the control thread
 	thread ctrl_thread(control, robot, sim);
 	
+	// particle filter thread
+	thread particle_filter_thread(particle_filter, robot);
+
     // while window is open:
     while (!glfwWindowShouldClose(window)) {
 		// update kinematic models
@@ -370,10 +381,12 @@ int main (int argc, char** argv) {
 	fSimulationRunning = false;
 	sim_thread.join();
 	ctrl_thread.join();
+	particle_filter_thread.join();
 
 	// close files
 	real_file.close();
 	estimate_file.close();
+	position_file.close();
 
     // destroy context
     glfwDestroyWindow(window);
@@ -384,67 +397,11 @@ int main (int argc, char** argv) {
 	return 0;
 }
 
+
 //------------------------------------------------------------------------------
-void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
-	robot->updateModel();
+void particle_filter(Model::ModelInterface* robot) {
 
 	int dof = robot->dof();
-	Eigen::VectorXd command_torques = Eigen::VectorXd::Zero(dof);
-	Eigen::VectorXd gravity_compensation;
-	Eigen::VectorXd nonlinear_terms;
-
-	// joint task
-	Eigen::VectorXd joint_task_torques = Eigen::VectorXd::Zero(dof);
-	double kp_joint = 0.0;
-	double kv_joint = 10.0;
-
-	// position task
-	const string link_name = "link4";
-	const Eigen::Vector3d pos_in_link = Eigen::Vector3d(0.0, 0.0, 1.0);
-	Eigen::MatrixXd J3d, Jv2d, Jw2d, Lambda, N, Jbar;
-	Eigen::MatrixXd Jr = Eigen::MatrixXd::Zero(6, dof);
-	J3d = Eigen::MatrixXd::Zero(6, dof);
-	Jw2d = Eigen::MatrixXd::Zero(1, dof);
-	Jv2d = Eigen::MatrixXd::Zero(2, dof);
-	Lambda = Eigen::MatrixXd(2,2);
-	Jbar = Eigen::MatrixXd(dof,2);
-	N = Eigen::MatrixXd(dof,dof);
-
-	Eigen::Vector2d pos_task_force;
-	Eigen::VectorXd pos_task_torques;
-
-	double kp_pos = 100.0;
-	double kv_pos = 20.0;
-
-	Eigen::Vector3d pos3d;
-	Eigen::Vector2d x, xdot;
-	Eigen::Vector3d x_init;
-	robot->position(x_init, link_name, pos_in_link);
-	Eigen::Vector2d xd = x_init.tail(2);
-
-	// initialize momentum observer
-	Eigen::VectorXd r = Eigen::VectorXd::Zero(dof); 
-	Eigen::VectorXd r_int = Eigen::VectorXd::Zero(dof);
-	Eigen::VectorXd p = Eigen::VectorXd::Zero(dof);
-	Eigen::MatrixXd K0 = Eigen::MatrixXd::Zero(dof,dof);
-	for(int i=0; i<dof; i++)
-	{
-		K0(i,i) = 100.0;
-	}
-	Eigen::VectorXd beta = Eigen::VectorXd::Zero(dof);
-
-	// collision identification
-	Eigen::VectorXd mu = Eigen::VectorXd::Zero(dof);
-	double eps_mu = 0.7;
-	Eigen::Vector3d Fi;
-	int collision_index = 0;
-	// Eigen::MatrixXd Ji = Eigen::MatrixXd(3,dof);
-	Eigen::Vector2d estimated_Fc;
-	Eigen::Vector2d estimated_rc;
-	Eigen::Matrix3d Ri3d;
-	// Eigen::Matrix2d Ri;
-	Eigen::Vector3d pos_i3d;
-	// Eigen::Vector2d pos_i;
 
 	// initialize particle filter variables
 
@@ -454,7 +411,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
 	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize+extraSamples);
 	Eigen::VectorXd resampledParticleIdx = Eigen::VectorXd::Zero(sampleSize+extraSamples);
-	Eigen::MatrixXd Jparticle, A, B;
+	Eigen::MatrixXd Jparticle;
 	Eigen::Vector3d Fopt3d;
 	Eigen::Vector2d Fopt2d;
 
@@ -480,54 +437,38 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// cout << "Particle : " << particleLocation << endl;
 		particleSetInit.row(i) = particleLocation;
 	}
-	// particleSet = particleSetInit;
 
-	// cout << particleSetInit << endl;
+
+	// collision identification
+	double eps_mu = 0.7;
+	int collision_index = 0;
+
+	Eigen::Vector2d estimated_Fc;
+	Eigen::Vector2d estimated_rc;
+	Eigen::Matrix3d Ri3d;
+	Eigen::Vector3d pos_i3d;
+
+	// r_filter = Eigen::Vector3d::Zero(dof);
 
 	// create a loop timer
-	double dt = 0.001;
-	double control_freq = 1/dt;
+	double dt = 0.01;
+	double filter_freq = 1/dt;
 	LoopTimer timer;
-	timer.setLoopFrequency(control_freq);   // 1 KHz
+	timer.setLoopFrequency(filter_freq);   // 1 KHz
 	double last_time = timer.elapsedTime(); //secs
 	bool fTimerDidSleep = true;
 	timer.initializeTimer(1000000); // 1 ms pause before starting loop
 
-	unsigned long long controller_counter = 0;
-
-	// Eigen::Vector3d sensed_force = Eigen::Vector3d::Zero();
-
-	bool gpjs = true;
-	// gpjs = false;
-
-	while (fSimulationRunning) { //automatically set to false when simulation is quit
+	while(fSimulationRunning)
+	{
 		fTimerDidSleep = timer.waitForNextLoop();
 
-		// update time
-		double curr_time = timer.elapsedTime();
-		double loop_dt = curr_time - last_time;
-
-		// read joint positions, velocities, update model
-		sim->getJointPositions(robot_name, robot->_q);
-		sim->getJointVelocities(robot_name, robot->_dq);
-		robot->updateModel();
-		robot->gravityVector(gravity_compensation);
-
-		// update momentum residual
-		p = robot->_M * robot->_dq;
-		beta = gravity_compensation;   // negelecting coriolis for now
-		r_int += (command_torques - beta + r)*dt;
-		r = K0*(p - r_int);
-
 		// collision identification and isolation
-		mu.setZero();
-		// pos_i.setZero();
 		collision_index = 0;
 		for(int i=0; i<dof; i++)
 		{
-			if(r(i) > eps_mu)
+			if(r_filter(i) > eps_mu)
 			{
-				mu(i) = r(i);
 				collision_index = i+1; //link where the collision happened
 			}
 		}
@@ -535,7 +476,6 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		{
 			case 3 :
 			contact_detected = true;
-			// robot->J_0(J3d, "link3", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link3");
 			robot->position(pos_i3d, "link3", Eigen::Vector3d::Zero());
 			//string currentLink("link3");
@@ -543,7 +483,6 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 			case 4 :
 			contact_detected = true;
-			// robot->J_0(J3d, "link4", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link4");
 			robot->position(pos_i3d, "link4", Eigen::Vector3d::Zero());
 			//string currentLink("link4");
@@ -551,7 +490,6 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 			default :
 			contact_detected = false;
-			J3d.setZero();
 
 			Fepp.setZero();
 			Fep.setZero();
@@ -575,51 +513,12 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			Prf.setZero();
 		}
 	
-		// cout << "line 447 " << endl;
-
-		// if(collision_index > 2 and collision_index <= dof)
-		// {
-		// 	// define matrices
-		// 	Ri = Ri3d.block(1,1,2,2);
-		// 	Ji = J3d.block(1,0,3,dof);
-		// 	// Ji.block(0,0,2,dof) = J3d.block(1,0,2,dof);
-		// 	// Ji.block(2,0,1,dof) = J3d.block(3,0,1,dof);
-
-		// 	// find equivqlent force at the joint frame
-		// 	Fi = (Ji.transpose()).colPivHouseholderQr().solve(mu);
-
-		// 	// deduce applied force
-		// 	estimated_Fc = Fi.head(2);
-		// 	estimated_Fc = Ri.transpose()*estimated_Fc;
-
-		// 	// find contact point via moment
-		// 	double ry = 0;
-		// 	if(estimated_Fc(0) > 0)
-		// 	{
-		// 		ry = -0.05;
-		// 	}
-		// 	else
-		// 	{
-		// 		ry = 0.05;
-		// 	}
-		// 	double rz = (ry*estimated_Fc(1) - Fi(2))/estimated_Fc(0);
-		// 	estimated_rc << ry, rz;
-
-		// 	// transform to base frame
-		// 	pos_i = pos_i3d.tail(2);
-		// 	estimated_rc = robot_origin.tail(2) + pos_i + Ri*estimated_rc;
-		// 	estimated_Fc = Ri*estimated_Fc;
-		// }
-
-
-
 		// -------------------------------------------
 		////////////////////////////// Particle Filter
 
 
 		if(contact_detected)
 		{
-
 			// use initial uniform particle set or motion model for the next time step
 			if (resampledParticleSet.isZero())
 			{
@@ -662,15 +561,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			 		robot->Jv(Jparticle, "link4", particleVec); 
 
 			 	}
-			 	// Eigen::MatrixXd Jparticle_2d = Jparticle.block(1,0,2,dof);
-			 	//Minimize   FAF+BF
-	            // A = Jparticle * Jparticle.transpose();
-	            // B = 2 * r.transpose() * Jparticle.transpose();
-	            // Fopt3d = -2 * A.inverse() * B.transpose();
 
-				Fopt3d = (Jparticle.transpose()).colPivHouseholderQr().solve(r);
-				// Fopt2d = (Jparticle_2d.transpose()).colPivHouseholderQr().solve(r);
-				// Fopt3d.setZero();
+				Fopt3d = (Jparticle.transpose()).colPivHouseholderQr().solve(r_filter);
 	            Fopt2d = Fopt3d.tail(2);
 	            particleForce.row(j) = Fopt2d;
 
@@ -679,8 +571,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	            //Subject to [0 -1 0]*F<=0
 	            if((Flocframe(1) > 0 && particleVec(1) < 0) || (Flocframe(1) < 0 && particleVec(1) > 0))
 	            {
-	            	error = (r - Jparticle.transpose()*Fopt3d);  
-	            	// error.setZero();  
+	            	error = (r_filter - Jparticle.transpose()*Fopt3d);  
 				 	weights(j) = exp(-0.5 * error.norm()*error.norm()); 	
 	            }
 	            else
@@ -704,7 +595,6 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			Eigen::Vector3d estimated_rc_3d = resampledParticleSet.colwise().mean();
 			estimated_rc_3d = robot_origin + pos_i3d + Ri3d*estimated_rc_3d;
 			estimated_rc = estimated_rc_3d.tail(2);
-			// estimated_rc.setZero();
 			estimated_Fc = particleForce.colwise().mean();
 		}
 		else
@@ -718,13 +608,13 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// filter forces
 		if(filter_forces)
 		{
-			Fef = (Fepp + 2*Fep + estimated_Fc)/controller_filter_gain + coeff_controller_filter[0]*Feppf + coeff_controller_filter[1]*Fepf;
+			Fef = (Fepp + 2*Fep + estimated_Fc)/filter_gain + coeff_filter[0]*Feppf + coeff_filter[1]*Fepf;
 			Fepp = Fep;
 			Fep = estimated_Fc;
 			Feppf = Fepf;
 			Fepf = Fef;
 
-			Pef = (Pepp + 2*Pep + estimated_rc)/controller_filter_gain + coeff_controller_filter[0]*Peppf + coeff_controller_filter[1]*Pepf;
+			Pef = (Pepp + 2*Pep + estimated_rc)/filter_gain + coeff_filter[0]*Peppf + coeff_filter[1]*Pepf;
 			Pepp = Pep;
 			Pep = estimated_rc;
 			Peppf = Pepf;
@@ -736,6 +626,117 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			Pef = estimated_rc;
 		}
 
+
+	}
+
+	double end_time = timer.elapsedTime();
+    std::cout << "\n";
+    std::cout << "Filter Loop run time  : " << end_time << " seconds\n";
+    std::cout << "Filter Loop updates   : " << timer.elapsedCycles() << "\n";
+    std::cout << "Filter Loop frequency : " << timer.elapsedCycles()/end_time << "Hz\n";
+
+}
+
+
+//------------------------------------------------------------------------------
+void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
+	robot->updateModel();
+
+	int dof = robot->dof();
+	Eigen::VectorXd command_torques = Eigen::VectorXd::Zero(dof);
+	Eigen::VectorXd gravity_compensation;
+	Eigen::VectorXd nonlinear_terms;
+
+	// joint task
+	Eigen::VectorXd joint_task_torques = Eigen::VectorXd::Zero(dof);
+	double kp_joint = 0.0;
+	double kv_joint = 10.0;
+
+	// position task
+	const string link_name = "link4";
+	const Eigen::Vector3d pos_in_link = Eigen::Vector3d(0.0, 0.0, 1.0);
+	Eigen::MatrixXd J3d, Jv2d, Jw2d, Lambda, N, Jbar;
+	Eigen::MatrixXd Jr = Eigen::MatrixXd::Zero(6, dof);
+	J3d = Eigen::MatrixXd::Zero(6, dof);
+	Jw2d = Eigen::MatrixXd::Zero(1, dof);
+	Jv2d = Eigen::MatrixXd::Zero(2, dof);
+	Lambda = Eigen::MatrixXd(2,2);
+	Jbar = Eigen::MatrixXd(dof,2);
+	N = Eigen::MatrixXd(dof,dof);
+
+	Eigen::Vector2d pos_task_force;
+	Eigen::VectorXd pos_task_torques;
+
+	double kp_pos = 400.0;
+	double kv_pos = 40.0;
+
+	Eigen::Vector3d pos3d;
+	Eigen::Vector2d x, xdot;
+	Eigen::Vector3d x_init;
+	robot->position(x_init, link_name, pos_in_link);
+	Eigen::Vector2d xd = x_init.tail(2);
+
+	// initialize momentum observer
+	Eigen::VectorXd r = Eigen::VectorXd::Zero(dof); 
+	Eigen::VectorXd r_int = Eigen::VectorXd::Zero(dof);
+	Eigen::VectorXd p = Eigen::VectorXd::Zero(dof);
+	Eigen::MatrixXd K0 = Eigen::MatrixXd::Zero(dof,dof);
+	for(int i=0; i<dof; i++)
+	{
+		K0(i,i) = 100.0;
+	}
+	Eigen::VectorXd beta = Eigen::VectorXd::Zero(dof);
+
+
+	// Eigen::MatrixXd Ji = Eigen::MatrixXd(3,dof);
+
+	// Eigen::Matrix2d Ri;
+	// Eigen::Vector2d pos_i;
+
+
+	// cout << particleSetInit << endl;
+
+	// create a loop timer
+	double dt = 0.001;
+	double control_freq = 1/dt;
+	LoopTimer timer;
+	timer.setLoopFrequency(control_freq);   // 1 KHz
+	double last_time = timer.elapsedTime(); //secs
+	bool fTimerDidSleep = true;
+	timer.initializeTimer(1000000); // 1 ms pause before starting loop
+
+	unsigned long long controller_counter = 0;
+
+	// Eigen::Vector3d sensed_force = Eigen::Vector3d::Zero();
+
+	bool gpjs = true;
+	// gpjs = false;
+
+	while (fSimulationRunning) { //automatically set to false when simulation is quit
+		fTimerDidSleep = timer.waitForNextLoop();
+
+		// update time
+		double curr_time = timer.elapsedTime();
+		double loop_dt = curr_time - last_time;
+
+		// read joint positions, velocities, update model
+		sim->getJointPositions(robot_name, robot->_q);
+		sim->getJointVelocities(robot_name, robot->_dq);
+		robot->updateModel();
+		robot->gravityVector(gravity_compensation);
+
+		// update momentum residual
+		p = robot->_M * robot->_dq;
+		beta = gravity_compensation;   // negelecting coriolis for now
+		r_int += (command_torques - beta + r)*dt;
+		r = K0*(p - r_int);
+
+		if(controller_counter % 10 == 0)
+		{
+			r_filter = r;
+		}
+
+		
 		// -------------------------------------------
 		// jacobian for control
 		robot->J_0(J3d, link_name, pos_in_link);
@@ -756,7 +757,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		pos_task_force = Lambda*(-kp_pos*(x - xd) - kv_pos*xdot);
 		if(!gpjs)
 		{
-			pos_task_force += Jbar.transpose() * gravity_compensation;
+			pos_task_force += Jbar.transpose() * (gravity_compensation - r);
 		}
 		pos_task_torques = Jv2d.transpose() * pos_task_force;
 
@@ -782,8 +783,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// 	cout << "rc : " << estimated_rc.transpose() << endl;
 		// 	cout << endl;
 		// }
-		// if(controller_counter == 3000)
-		if(timer.elapsedTime() >= 1)
+		if(controller_counter == 3000)
+		// if(timer.elapsedTime() >= 1)
 		{
 			gpjs = false;
 		}
@@ -792,6 +793,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 		// write estimates to file
 		estimate_file << timer.elapsedTime() << '\t' << Fef.transpose() << '\t' << Pef.transpose() << endl;
+		position_file << timer.elapsedTime() << '\t' << xd.transpose() << '\t' << x.transpose() << endl;
 
 		// -------------------------------------------
 		// update last time
@@ -897,7 +899,7 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// }
 
 		// log real force and position values to file
-		real_file << timer.elapsedTime() << '\t' << Frf.transpose() << '\t' << real_contact_position.transpose() << endl;
+		real_file << timer.elapsedTime() << '\t' << Frf.transpose() << '\t' << Prf.transpose() << endl;
 
 		//update last time
 		last_time = curr_time;
