@@ -343,9 +343,9 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	// initialize particle filter variables
 	int sampleSize = 50;
 	int extraSamples = 20;
-	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd(sampleSize+extraSamples,3);
-	Eigen::MatrixXd particleSet = Eigen::MatrixXd(sampleSize+extraSamples,3);
-	Eigen::MatrixXd particleInfo = Eigen::MatrixXd(sampleSize+extraSamples,4); //contains y,z,weight,force
+	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
+	Eigen::MatrixXd particleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
+	Eigen::MatrixXd particleInfo = Eigen::MatrixXd::Zero(sampleSize+extraSamples,4); //contains y,z,weight,force
 	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,2);
 	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize+extraSamples);
 	Eigen::VectorXd resampledParticleIdx = Eigen::VectorXd::Zero(sampleSize+extraSamples);
@@ -482,7 +482,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		////////////////////////////// Particle Filter
 
 		// initial uniform sampling
-		for (int i=0; i<sampleSize + extraSamples; i++)
+		for (int i=0; i<sampleSize; i++)
 		{	
 			int sign;
 			if (i % 2 == 0)
@@ -508,6 +508,22 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			particleSet = motionModel(resampledParticleSet);
 		}
 
+		// Add 20 extra random samples to the current particleSet
+		for (int i=sampleSize+1; i<(sampleSize + extraSamples); i++)
+		{	
+			int sign;
+			if (i % 2 == 0)
+			{
+				sign = 1;
+			}
+			else
+			{
+				sign = -1;
+			}
+			particleLocation << Ri3d.transpose()*pos_i3d + sign*linkDepthVec + Eigen::Vector3d(0,0,i*1/(sampleSize/2));  // CHECK 
+			particleSet.row(i) = particleLocation;
+		}
+
 		// compute importance weights
 		for (int j=0; j<sampleSize + extraSamples; j++)
 		{
@@ -529,6 +545,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
             B = 2 * r.transpose() * Jparticle.transpose();
             Fopt3d = -2 * A.inverse() * B.transpose();
             Fopt2d = Fopt3d.tail(2);
+            
             //Subject to [0 -1 0]*F<=0
             if((Fopt2d(1) > 0 && particleVec(2) < 0) || (Fopt2d(1) < 0 && particleVec(2) > 0))
             {
