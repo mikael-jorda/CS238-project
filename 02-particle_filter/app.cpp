@@ -117,10 +117,28 @@ Eigen::MatrixXd motionModel(Eigen::MatrixXd particleSet)
 {
 	double numParticles = particleSet.rows();
 	Eigen::MatrixXd movedParticleSet = Eigen::VectorXd::Zero(numParticles);
+	Eigen::VectorXd particleLocation;
+	float normalSample;
 
 	for (int i=0; i<=numParticles; i++)
 	{
-		
+		// random device class instance, source of 'true' randomness for initializing random seed
+	    random_device rd; 
+
+	    // Mersenne twister PRNG, initialized with seed from random device instance
+	    mt19937 gen(rd()); 
+
+	    //particleLocation
+	    particleLocation = particleSet.row(i);
+
+	    // instance of class normal_distribution with specific mean and stddev
+        normal_distribution<float> d(particleLocation(2), 0.005); 
+
+        // get random number with normal distribution using gen as random source
+        normalSample = d(gen); 
+
+        // save location
+        movedParticleSet.row(i) << (0,particleLocation(1),normalSample);
 	}
 
 	return movedParticleSet;
@@ -346,7 +364,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
 	Eigen::MatrixXd particleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
 	Eigen::MatrixXd particleInfo = Eigen::MatrixXd::Zero(sampleSize+extraSamples,4); //contains y,z,weight,force
-	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,2);
+	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
 	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize+extraSamples);
 	Eigen::VectorXd resampledParticleIdx = Eigen::VectorXd::Zero(sampleSize+extraSamples);
 	Eigen::MatrixXd Jparticle, A, B;
