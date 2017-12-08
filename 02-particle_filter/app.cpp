@@ -46,8 +46,10 @@ double controller_filter_gain = 4.806381793e+02;
 double simulation_filter_gain = 1.861608837e+03;
 Eigen::Vector2d Fepp, Fep, Feppf, Fepf, Fef;
 Eigen::Vector2d Frpp, Frp, Frppf, Frpf, Frf;
+Eigen::Vector2d Pepp, Pep, Peppf, Pepf, Pef;
+Eigen::Vector2d Prpp, Prp, Prppf, Prpf, Prf;
 
-bool in_contact = false;
+bool contact_detected = false;
 
 int sampleSize = 50;
 int extraSamples = 0;
@@ -170,7 +172,32 @@ int main (int argc, char** argv) {
 		graphic_particles[i]->m_material->setColorf(1.0,0.0,0.0);
 		graphics->_world->addChild(graphic_particles[i]);
 	}
+	camera_lookat << 0.0, 0.0, 1.0;
+	auto sphere_rpos = new chai3d::cShapeSphere(0.08);
+	auto sphere_epos = new chai3d::cShapeSphere(0.08);
+	auto line_rforce = new chai3d::cShapeLine();
+	auto line_eforce = new chai3d::cShapeLine();
+	graphics->_world->addChild(sphere_epos);
+	graphics->_world->addChild(sphere_rpos);
+	graphics->_world->addChild(line_eforce);
+	graphics->_world->addChild(line_rforce);
+	// change position
+	// sphere->setLocalPos(Eigen::Vector3d(0.0, 0.0, 1.0));
+	// color
+	sphere_epos->m_material->setColorf(0.6, 0.5, 0.2);
+	sphere_rpos->m_material->setColorf(0.2, 0.5, 0.3);
 
+	line_rforce->m_colorPointA = chai3d::cColorf(0.2, 0.5, 0.3);
+	line_rforce->m_colorPointB = chai3d::cColorf(0.2, 0.5, 0.3);
+	line_eforce->m_colorPointA = chai3d::cColorf(0.6, 0.5, 0.2);
+	line_eforce->m_colorPointB = chai3d::cColorf(0.6, 0.5, 0.2);
+	line_rforce->setLineWidth(4.0);
+	line_eforce->setLineWidth(4.0);
+
+	sphere_rpos->setShowEnabled(false);
+	sphere_epos->setShowEnabled(false);
+	line_rforce->setShowEnabled(false);
+	line_eforce->setShowEnabled(false);
 
 	// load robots
 	auto robot = new Model::ModelInterface(robot_file, Model::rbdl, Model::urdf, false);
@@ -181,9 +208,9 @@ int main (int argc, char** argv) {
 	sim->setCoeffFrictionStatic(0.6);
 
 	// set initial condition
-	robot->_q << -50.0/180.0*M_PI,
-				 -25.0/180.0*M_PI,
-				 -35.0/180.0*M_PI,
+	robot->_q << -75.0/180.0*M_PI,
+				  25.0/180.0*M_PI,
+				 -60.0/180.0*M_PI,
 				  10.0/180.0*M_PI;
 	sim->setJointPositions(robot_name, robot->_q);
 	robot->updateModel();
@@ -214,6 +241,16 @@ int main (int argc, char** argv) {
 	Frppf.setZero();
 	Frpf.setZero();
 	Frf.setZero();
+	Pepp.setZero();
+	Pep.setZero();
+	Peppf.setZero();
+	Pepf.setZero();
+	Pef.setZero();
+	Prpp.setZero();
+	Prp.setZero();
+	Prppf.setZero();
+	Prpf.setZero();
+	Prf.setZero();
 
 	// start the simulation thread first
 	fSimulationRunning = true;
@@ -237,6 +274,30 @@ int main (int argc, char** argv) {
     		Eigen::Vector3d tmp = particleSet.row(i);
 			graphic_particles[i]->setLocalPos(robot_origin + link_origin + Rlink*tmp);
     	}
+
+		// update contact position and force
+		if(contact_detected)
+		{
+			sphere_rpos->setShowEnabled(true);
+			sphere_epos->setShowEnabled(true);
+			line_rforce->setShowEnabled(true);
+			line_eforce->setShowEnabled(true);
+			sphere_epos->setLocalPos(Eigen::Vector3d(0.02,Pef(0),Pef(1)));
+			sphere_rpos->setLocalPos(Eigen::Vector3d(0.02,Prf(0),Prf(1)));
+			line_eforce->m_pointA = chai3d::cVector3d(Eigen::Vector3d(0.02,Pef(0),Pef(1)));
+			line_eforce->m_pointB = chai3d::cVector3d(Eigen::Vector3d(0.02,Pef(0)+0.05*Fef(0),Pef(1)+0.05*Fef(1)));
+			line_rforce->m_pointA = chai3d::cVector3d(Eigen::Vector3d(0.02,Prf(0),Prf(1)));
+			line_rforce->m_pointB = chai3d::cVector3d(Eigen::Vector3d(0.02,Prf(0)+0.05*Frf(0),Prf(1)+0.05*Frf(1)));
+		}
+		else
+		{
+			sphere_rpos->setShowEnabled(false);
+			sphere_epos->setShowEnabled(false);
+			line_rforce->setShowEnabled(false);
+			line_eforce->setShowEnabled(false);
+		}
+
+
 
 		// update graphics. this automatically waits for the correct amount of time
 		int width, height;
@@ -473,7 +534,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		switch(collision_index)
 		{
 			case 3 :
-			in_contact = true;
+			contact_detected = true;
 			// robot->J_0(J3d, "link3", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link3");
 			robot->position(pos_i3d, "link3", Eigen::Vector3d::Zero());
@@ -481,7 +542,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			break;
 
 			case 4 :
-			in_contact = true;
+			contact_detected = true;
 			// robot->J_0(J3d, "link4", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link4");
 			robot->position(pos_i3d, "link4", Eigen::Vector3d::Zero());
@@ -489,8 +550,29 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			break;
 
 			default :
-			in_contact = false;
+			contact_detected = false;
 			J3d.setZero();
+
+			Fepp.setZero();
+			Fep.setZero();
+			Feppf.setZero();
+			Fepf.setZero();
+			Fef.setZero();
+			Frpp.setZero();
+			Frp.setZero();
+			Frppf.setZero();
+			Frpf.setZero();
+			Frf.setZero();
+			Pepp.setZero();
+			Pep.setZero();
+			Peppf.setZero();
+			Pepf.setZero();
+			Pef.setZero();
+			Prpp.setZero();
+			Prp.setZero();
+			Prppf.setZero();
+			Prpf.setZero();
+			Prf.setZero();
 		}
 	
 		// cout << "line 447 " << endl;
@@ -535,94 +617,94 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		////////////////////////////// Particle Filter
 
 
-		if(in_contact)
+		if(contact_detected)
 		{
 
-		// use initial uniform particle set or motion model for the next time step
-		if (resampledParticleSet.isZero())
-		{
-			particleSet = particleSetInit;
-		}
-		else // move resampled particles according to normal distribution
-		{
-			particleSet = motionModel(resampledParticleSet);
-		}
-
-		// Add 20 extra random samples to the current particleSet
-		for (int i=sampleSize+1; i<(sampleSize + extraSamples); i++)
-		{	
-			int sign;
-			if (i % 2 == 0)
+			// use initial uniform particle set or motion model for the next time step
+			if (resampledParticleSet.isZero())
 			{
-				sign = 1;
+				particleSet = particleSetInit;
 			}
-			else
+			else // move resampled particles according to normal distribution
 			{
-				sign = -1;
+				particleSet = motionModel(resampledParticleSet);
 			}
-			// particleLocation << Ri3d.transpose()*pos_i3d + sign*linkDepthVec + Eigen::Vector3d(0,0,i*1/(sampleSize/2));  // CHECK 
-			particleLocation << sign*linkDepthVec + Eigen::Vector3d(0,0,(double)(i - sampleSize)/(extraSamples)); 
-			particleSet.row(i) = particleLocation;
-		}
 
-		// compute importance weights
-		for (int j=0; j<sampleSize + extraSamples; j++)
-		{
-			Eigen::Vector3d particleVec;
-			particleVec = particleSet.row(j);
+			// Add 20 extra random samples to the current particleSet
+			for (int i=sampleSize+1; i<(sampleSize + extraSamples); i++)
+			{	
+				int sign;
+				if (i % 2 == 0)
+				{
+					sign = 1;
+				}
+				else
+				{
+					sign = -1;
+				}
+				// particleLocation << Ri3d.transpose()*pos_i3d + sign*linkDepthVec + Eigen::Vector3d(0,0,i*1/(sampleSize/2));  // CHECK 
+				particleLocation << sign*linkDepthVec + Eigen::Vector3d(0,0,(double)(i - sampleSize)/(extraSamples)); 
+				particleSet.row(i) = particleLocation;
+			}
 
-			if(collision_index == 3) //find the jacobian for the current particle location
+			// compute importance weights
+			for (int j=0; j<sampleSize + extraSamples; j++)
 			{
-		 		robot->Jv(Jparticle, "link3", particleVec); 
+				Eigen::Vector3d particleVec;
+				particleVec = particleSet.row(j);
+
+				if(collision_index == 3) //find the jacobian for the current particle location
+				{
+			 		robot->Jv(Jparticle, "link3", particleVec); 
+				}
+			 	else
+			 	{
+			 		robot->Jv(Jparticle, "link4", particleVec); 
+
+			 	}
+
+			 	//Minimize   FAF+BF
+	            // A = Jparticle * Jparticle.transpose();
+	            // B = 2 * r.transpose() * Jparticle.transpose();
+	            // Fopt3d = -2 * A.inverse() * B.transpose();
+
+				Fopt3d = (Jparticle.transpose()).colPivHouseholderQr().solve(r);
+				// Fopt3d.setZero();
+	            Fopt2d = Fopt3d.tail(2);
+	            particleForce.row(j) = Fopt2d;
+
+	            // Eigen::Vector3d Flocframe = Ri3d.transpose()*Fopt3d;
+	            
+	            //Subject to [0 -1 0]*F<=0
+	            // if((Flocframe(1) > 0 && particleVec(1) < 0) || (Flocframe(1) < 0 && particleVec(1) > 0))
+	            // {
+	            	error = (r - Jparticle.transpose()*Fopt3d);  
+	            	// error.setZero();  
+				 	weights(j) = exp(-0.5 * error.norm()*error.norm()); 	
+	            // }
+	            // else
+	            // {
+		         	// weights(j) = 0; //discard particles that give an F in the wrong half plane   
+	            // }	
 			}
-		 	else
-		 	{
-		 		robot->Jv(Jparticle, "link4", particleVec); 
 
-		 	}
+			// normalize weights
+			weights = weights/ weights.sum();
+			
+			// resample
+			resampledParticleIdx = resample(weights);
 
-		 	//Minimize   FAF+BF
-            // A = Jparticle * Jparticle.transpose();
-            // B = 2 * r.transpose() * Jparticle.transpose();
-            // Fopt3d = -2 * A.inverse() * B.transpose();
+			for (int i=0; i<sampleSize + extraSamples; i++)
+			{
+				resampledParticleSet.row(i) = particleSet.row(resampledParticleIdx(i));
+			}
 
-			Fopt3d = (Jparticle.transpose()).colPivHouseholderQr().solve(r);
-			// Fopt3d.setZero();
-            Fopt2d = Fopt3d.tail(2);
-            particleForce.row(j) = Fopt2d;
-
-            // Eigen::Vector3d Flocframe = Ri3d.transpose()*Fopt3d;
-            
-            //Subject to [0 -1 0]*F<=0
-            // if((Flocframe(1) > 0 && particleVec(1) < 0) || (Flocframe(1) < 0 && particleVec(1) > 0))
-            // {
-            	error = (r - Jparticle.transpose()*Fopt3d);  
-            	// error.setZero();  
-			 	weights(j) = exp(-0.5 * error.norm()*error.norm()); 	
-            // }
-            // else
-            // {
-	         	// weights(j) = 0; //discard particles that give an F in the wrong half plane   
-            // }	
-		}
-
-		// normalize weights
-		weights = weights/ weights.sum();
-		
-		// resample
-		resampledParticleIdx = resample(weights);
-
-		for (int i=0; i<sampleSize + extraSamples; i++)
-		{
-			resampledParticleSet.row(i) = particleSet.row(resampledParticleIdx(i));
-		}
-
-		// select the average
-		Eigen::Vector3d estimated_rc_3d = resampledParticleSet.colwise().mean();
-		estimated_rc_3d = robot_origin + pos_i3d + Ri3d*estimated_rc_3d;
-		estimated_rc = estimated_rc_3d.tail(2);
-		// estimated_rc.setZero();
-		estimated_Fc = particleForce.colwise().mean();
+			// select the average
+			Eigen::Vector3d estimated_rc_3d = resampledParticleSet.colwise().mean();
+			estimated_rc_3d = robot_origin + pos_i3d + Ri3d*estimated_rc_3d;
+			estimated_rc = estimated_rc_3d.tail(2);
+			// estimated_rc.setZero();
+			estimated_Fc = particleForce.colwise().mean();
 		}
 		else
 		{
@@ -640,10 +722,17 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			Fep = estimated_Fc;
 			Feppf = Fepf;
 			Fepf = Fef;
+
+			Pef = (Pepp + 2*Pep + estimated_rc)/controller_filter_gain + coeff_controller_filter[0]*Peppf + coeff_controller_filter[1]*Pepf;
+			Pepp = Pep;
+			Pep = estimated_rc;
+			Peppf = Pepf;
+			Pepf = Pef;
 		}
 		else
 		{
 			Fef = estimated_Fc;
+			Pef = estimated_rc;
 		}
 
 		// -------------------------------------------
@@ -701,7 +790,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		controller_counter++;
 
 		// write estimates to file
-		estimate_file << timer.elapsedTime() << '\t' << Fef.transpose() << '\t' << estimated_rc.transpose() << endl;
+		estimate_file << timer.elapsedTime() << '\t' << Fef.transpose() << '\t' << Pef.transpose() << endl;
 
 		// -------------------------------------------
 		// update last time
@@ -781,10 +870,17 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			Frp = real_forces;
 			Frppf = Frpf;
 			Frpf = Frf;
+		
+			Prf = (Prpp + 2*Prp + real_contact_position)/simulation_filter_gain + coeff_simulation_filter[0]*Prppf + coeff_simulation_filter[1]*Prpf;
+			Prpp = Prp;
+			Prp = real_contact_position;
+			Prppf = Prpf;
+			Prpf = Prf;
 		}
 		else
 		{
 			Frf = real_forces;
+			Prf = real_contact_position;
 		}
 
 
