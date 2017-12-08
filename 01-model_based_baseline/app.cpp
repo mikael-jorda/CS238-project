@@ -29,7 +29,8 @@ const string camera_name = "camera_fixed";
 
 const string datafile_estimate = "../../01-model_based_baseline/data_logging/estimates.txt";
 const string datafile_real = "../../01-model_based_baseline/data_logging/real.txt";
-ofstream real_file, estimate_file;
+const string datafile_ee_position = "../../01-model_based_baseline/data_logging/pos.txt";
+ofstream real_file, estimate_file, position_file;
 
 Eigen::Vector3d robot_origin = Eigen::Vector3d(0.0, -1.5, 0.050001);
 
@@ -43,7 +44,10 @@ double controller_filter_gain = 4.806381793e+02;
 double simulation_filter_gain = 1.861608837e+03;
 Eigen::Vector2d Fepp, Fep, Feppf, Fepf, Fef;
 Eigen::Vector2d Frpp, Frp, Frppf, Frpf, Frf;
+Eigen::Vector2d Pepp, Pep, Peppf, Pepf, Pef;
+Eigen::Vector2d Prpp, Prp, Prppf, Prpf, Prf;
 
+bool contact_detected = false;
 
 // simulation loop
 void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
@@ -70,6 +74,7 @@ bool fTransZp = false;
 bool fTransZn = false;
 bool fRotPanTilt = false;
 
+
 int main (int argc, char** argv) {
 	cout << "Loading URDF world model file: " << world_file << endl;
 
@@ -82,6 +87,34 @@ int main (int argc, char** argv) {
 	auto graphics = new Graphics::ChaiGraphics(world_file, Graphics::urdf, false);
 	Eigen::Vector3d camera_pos, camera_lookat, camera_vertical;
 	graphics->getCameraPose(camera_name, camera_pos, camera_vertical, camera_lookat);
+    // cout << camera_lookat.transpose() << endl;
+    camera_lookat << 0.0, 0.0, 1.0;
+	auto sphere_rpos = new chai3d::cShapeSphere(0.08);
+	auto sphere_epos = new chai3d::cShapeSphere(0.08);
+	auto line_rforce = new chai3d::cShapeLine();
+	auto line_eforce = new chai3d::cShapeLine();
+	graphics->_world->addChild(sphere_epos);
+	graphics->_world->addChild(sphere_rpos);
+	graphics->_world->addChild(line_eforce);
+	graphics->_world->addChild(line_rforce);
+	// change position
+	// sphere->setLocalPos(Eigen::Vector3d(0.0, 0.0, 1.0));
+	// color
+	sphere_epos->m_material->setColorf(0.6, 0.5, 0.2);
+	sphere_rpos->m_material->setColorf(0.2, 0.5, 0.3);
+
+	line_rforce->m_colorPointA = chai3d::cColorf(0.2, 0.5, 0.3);
+	line_rforce->m_colorPointB = chai3d::cColorf(0.2, 0.5, 0.3);
+	line_eforce->m_colorPointA = chai3d::cColorf(0.6, 0.5, 0.2);
+	line_eforce->m_colorPointB = chai3d::cColorf(0.6, 0.5, 0.2);
+	line_rforce->setLineWidth(4.0);
+	line_eforce->setLineWidth(4.0);
+
+	sphere_rpos->setShowEnabled(false);
+	sphere_epos->setShowEnabled(false);
+	line_rforce->setShowEnabled(false);
+	line_eforce->setShowEnabled(false);
+
 	// load robots
 	auto robot = new Model::ModelInterface(robot_file, Model::rbdl, Model::urdf, false);
 
@@ -91,9 +124,9 @@ int main (int argc, char** argv) {
 	sim->setCoeffFrictionStatic(0.6);
 
 	// set initial condition
-	robot->_q << -50.0/180.0*M_PI,
-				 -25.0/180.0*M_PI,
-				 -35.0/180.0*M_PI,
+	robot->_q << -75.0/180.0*M_PI,
+				  25.0/180.0*M_PI,
+				 -60.0/180.0*M_PI,
 				  10.0/180.0*M_PI;
 	sim->setJointPositions(robot_name, robot->_q);
 	robot->updateModel();
@@ -110,8 +143,10 @@ int main (int argc, char** argv) {
 	// open files for data logging
 	real_file.open(datafile_real);
 	estimate_file.open(datafile_estimate);
+	position_file.open(datafile_ee_position);
 	estimate_file << "time \t force \t position\n";
 	real_file << "time \t force \t position\n";
+	position_file << "time \t desired_ee_pos \t ee_pos\n";
 
 	// initialize filter variables
 	Fepp.setZero();
@@ -125,6 +160,19 @@ int main (int argc, char** argv) {
 	Frpf.setZero();
 	Frf.setZero();
 
+	Pepp.setZero();
+	Pep.setZero();
+	Peppf.setZero();
+	Pepf.setZero();
+	Pef.setZero();
+	Prpp.setZero();
+	Prp.setZero();
+	Prppf.setZero();
+	Prpf.setZero();
+	Prf.setZero();
+
+	getchar();
+
 	// start the simulation thread first
 	fSimulationRunning = true;
 	thread sim_thread(simulation, robot, sim);
@@ -136,6 +184,29 @@ int main (int argc, char** argv) {
     while (!glfwWindowShouldClose(window)) {
 		// update kinematic models
 		// robot->updateModel();
+
+		// update contact position and force
+		if(contact_detected)
+		{
+			sphere_rpos->setShowEnabled(true);
+			sphere_epos->setShowEnabled(true);
+			line_rforce->setShowEnabled(true);
+			line_eforce->setShowEnabled(true);
+			sphere_epos->setLocalPos(Eigen::Vector3d(0.02,Pef(0),Pef(1)));
+			sphere_rpos->setLocalPos(Eigen::Vector3d(0.02,Prf(0),Prf(1)));
+			line_eforce->m_pointA = chai3d::cVector3d(Eigen::Vector3d(0.02,Pef(0),Pef(1)));
+			line_eforce->m_pointB = chai3d::cVector3d(Eigen::Vector3d(0.02,Pef(0)+0.05*Fef(0),Pef(1)+0.05*Fef(1)));
+			line_rforce->m_pointA = chai3d::cVector3d(Eigen::Vector3d(0.02,Prf(0),Prf(1)));
+			line_rforce->m_pointB = chai3d::cVector3d(Eigen::Vector3d(0.02,Prf(0)+0.05*Frf(0),Prf(1)+0.05*Frf(1)));
+		}
+		else
+		{
+			sphere_rpos->setShowEnabled(false);
+			sphere_epos->setShowEnabled(false);
+			line_rforce->setShowEnabled(false);
+			line_eforce->setShowEnabled(false);
+		}
+
 
 		// update graphics. this automatically waits for the correct amount of time
 		int width, height;
@@ -200,6 +271,7 @@ int main (int argc, char** argv) {
 			Eigen::Matrix3d m_pan; m_pan = Eigen::AngleAxisd(compass, -cam_up_axis);
 			camera_pos = camera_lookat + m_pan*(camera_pos - camera_lookat);
 	    }
+	    // cout << camera_lookat.transpose() << endl;
 	    graphics->setCameraPose(camera_name, camera_pos, cam_up_axis, camera_lookat);
 	    glfwGetCursorPos(window, &last_cursorx, &last_cursory);
 	}
@@ -212,6 +284,7 @@ int main (int argc, char** argv) {
 	// close files
 	real_file.close();
 	estimate_file.close();
+	position_file.close();
 
     // destroy context
     glfwDestroyWindow(window);
@@ -251,8 +324,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	Eigen::Vector2d pos_task_force;
 	Eigen::VectorXd pos_task_torques;
 
-	double kp_pos = 100.0;
-	double kv_pos = 20.0;
+	double kp_pos = 300.0;
+	double kv_pos = 40.0;
 
 	Eigen::Vector3d pos3d;
 	Eigen::Vector2d x, xdot;
@@ -342,19 +415,46 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			// break;
 
 			case 3 :
+			contact_detected = true;
 			robot->J_0(J3d, "link3", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link3");
 			robot->position(pos_i3d, "link3", Eigen::Vector3d::Zero());
 			break;
 
 			case 4 :
+			contact_detected = true;
 			robot->J_0(J3d, "link4", Eigen::Vector3d::Zero());
 			robot->rotation(Ri3d, "link4");
 			robot->position(pos_i3d, "link4", Eigen::Vector3d::Zero());
 			break;
 
 			default :
+			contact_detected = false;
+			Ri3d.setIdentity();
+			pos_i3d.setZero();
 			J3d.setZero();
+			Fepp.setZero();
+			Fep.setZero();
+			Feppf.setZero();
+			Fepf.setZero();
+			Fef.setZero();
+			Frpp.setZero();
+			Frp.setZero();
+			Frppf.setZero();
+			Frpf.setZero();
+			Frf.setZero();
+			Pepp.setZero();
+			Pep.setZero();
+			Peppf.setZero();
+			Pepf.setZero();
+			Pef.setZero();
+			Prpp.setZero();
+			Prp.setZero();
+			Prppf.setZero();
+			Prpf.setZero();
+			Prf.setZero();
+			
+
 		}
 
 		if(collision_index > 2 and collision_index <= dof)
@@ -399,10 +499,17 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			Fep = estimated_Fc;
 			Feppf = Fepf;
 			Fepf = Fef;
+
+			Pef = (Pepp + 2*Pep + estimated_rc)/controller_filter_gain + coeff_controller_filter[0]*Peppf + coeff_controller_filter[1]*Pepf;
+			Pepp = Pep;
+			Pep = estimated_rc;
+			Peppf = Pepf;
+			Pepf = Pef;
 		}
 		else
 		{
 			Fef = estimated_Fc;
+			Pef = estimated_rc;
 		}
 
 		// jacobian for control
@@ -426,7 +533,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		pos_task_force = Lambda*(-kp_pos*(x - xd) - kv_pos*xdot);
 		if(!gpjs)
 		{
-			pos_task_force += Jbar.transpose() * gravity_compensation;
+			pos_task_force += Jbar.transpose() * gravity_compensation - Jbar.transpose() * r;
 		}
 		pos_task_torques = Jv2d.transpose() * pos_task_force;
 
@@ -460,7 +567,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		controller_counter++;
 
 		// write estimates to file
-		estimate_file << timer.elapsedTime() << '\t' << Fef.transpose() << '\t' << estimated_rc.transpose() << endl;
+		estimate_file << timer.elapsedTime() << '\t' << Fef.transpose() << '\t' << Pef.transpose() << endl;
+		position_file << timer.elapsedTime() << '\t' << xd.transpose() << '\t' << x.transpose() << endl;
 
 		// -------------------------------------------
 		// update last time
@@ -482,6 +590,7 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	// real forces and contact point
 	std::string robot_name = "4PBOT";
 	std::string link_name = "link3";
+	// std::string link_name = "link4";
 	std::vector<Eigen::Vector3d> point_list;
 	std::vector<Eigen::Vector3d> force_list;
 	Eigen::Vector3d sensed_force, sensed_moment;
@@ -492,7 +601,7 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	// create a timer
 	LoopTimer timer;
 	timer.initializeTimer();
-	timer.setLoopFrequency(2000); 
+	timer.setLoopFrequency(4000); 
 	double last_time = timer.elapsedTime(); //secs
 	bool fTimerDidSleep = true;
 
@@ -539,10 +648,17 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			Frp = real_forces;
 			Frppf = Frpf;
 			Frpf = Frf;
+
+			Prf = (Prpp + 2*Prp + real_contact_position)/simulation_filter_gain + coeff_simulation_filter[0]*Prppf + coeff_simulation_filter[1]*Prpf;
+			Prpp = Prp;
+			Prp = real_contact_position;
+			Prppf = Prpf;
+			Prpf = Prf;
 		}
 		else
 		{
 			Frf = real_forces;
+			Prf = real_contact_position;
 		}
 
 
@@ -558,7 +674,7 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// }
 
 		// log real force and position values to file
-		real_file << timer.elapsedTime() << '\t' << Frf.transpose() << '\t' << real_contact_position.transpose() << endl;
+		real_file << timer.elapsedTime() << '\t' << Frf.transpose() << '\t' << Prf.transpose() << endl;
 
 		//update last time
 		last_time = curr_time;
