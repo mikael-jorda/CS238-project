@@ -33,9 +33,13 @@ const string camera_name = "camera_fixed";
 const string datafile_estimate = "../../02-particle_filter/data_logging/estimates.txt";
 const string datafile_real = "../../02-particle_filter/data_logging/real.txt";
 const string datafile_ee_position = "../../02-particle_filter/data_logging/pos.txt";
+// const string datafile_ee_position = "../../02-particle_filter/data_logging/pos.txt";
 ofstream real_file, estimate_file, position_file;
 
 Eigen::Vector3d robot_origin = Eigen::Vector3d(0.0, -1.5, 0.050001);
+
+bool pause_program = false;
+bool resume_program = true;
 
 // filtering the force signals
 // bool filter_forces = false;
@@ -57,6 +61,7 @@ bool contact_detected = false;
 int sampleSize = 50;
 int extraSamples = 0;
 Eigen::MatrixXd particleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
+Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
 Eigen::VectorXd r_filter = Eigen::VectorXd::Zero(4);
 
 
@@ -174,11 +179,11 @@ int main (int argc, char** argv) {
 	vector<chai3d::cShapeSphere*> graphic_particles;
 	for(int i=0; i < sampleSize + extraSamples; i++)
 	{
-		graphic_particles.push_back(new chai3d::cShapeSphere(0.03));
+		graphic_particles.push_back(new chai3d::cShapeSphere(0.01));
 		graphic_particles[i]->m_material->setColorf(1.0,0.0,0.0);
 		graphics->_world->addChild(graphic_particles[i]);
 	}
-	camera_lookat << 0.0, 0.0, 1.0;
+	camera_lookat << 0.0, 0.9, 1.3;
 	auto sphere_rpos = new chai3d::cShapeSphere(0.08);
 	auto sphere_epos = new chai3d::cShapeSphere(0.08);
 	auto line_rforce = new chai3d::cShapeLine();
@@ -260,6 +265,8 @@ int main (int argc, char** argv) {
 	Prpf.setZero();
 	Prf.setZero();
 
+	// getchar();
+
 	// start the simulation thread first
 	fSimulationRunning = true;
 	thread sim_thread(simulation, robot, sim);
@@ -283,16 +290,16 @@ int main (int argc, char** argv) {
     	for(int i=0; i< sampleSize+extraSamples; i++)
     	{
     		Eigen::Vector3d tmp = particleSet.row(i);
-			graphic_particles[i]->setLocalPos(robot_origin + link_origin + Rlink*tmp);
+			graphic_particles[i]->setLocalPos(Eigen::Vector3d(0.02,0,0) + robot_origin + link_origin + Rlink*tmp);
     	}
 
 		// update contact position and force
 		if(contact_detected)
 		{
-			sphere_rpos->setShowEnabled(true);
-			sphere_epos->setShowEnabled(true);
-			line_rforce->setShowEnabled(true);
-			line_eforce->setShowEnabled(true);
+			// sphere_rpos->setShowEnabled(true);
+			// sphere_epos->setShowEnabled(true);
+			// line_rforce->setShowEnabled(true);
+			// line_eforce->setShowEnabled(true);
 			sphere_epos->setLocalPos(Eigen::Vector3d(0.02,Pef(0),Pef(1)));
 			sphere_rpos->setLocalPos(Eigen::Vector3d(0.02,Prf(0),Prf(1)));
 			line_eforce->m_pointA = chai3d::cVector3d(Eigen::Vector3d(0.02,Pef(0),Pef(1)));
@@ -308,6 +315,13 @@ int main (int argc, char** argv) {
 			line_eforce->setShowEnabled(false);
 		}
 
+		if(contact_detected)
+		{
+			pause_program = true;
+			resume_program = false;
+			getchar();
+			resume_program = true;
+		}
 
 
 		// update graphics. this automatically waits for the correct amount of time
@@ -408,7 +422,6 @@ void particle_filter(Model::ModelInterface* robot) {
 	Eigen::MatrixXd particleSetInit = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
 	Eigen::MatrixXd particleForce = Eigen::MatrixXd::Zero(sampleSize+extraSamples,2);
 	// Eigen::MatrixXd particleInfo = Eigen::MatrixXd::Zero(sampleSize+extraSamples,4); //contains y,z,weight,force
-	Eigen::MatrixXd resampledParticleSet = Eigen::MatrixXd::Zero(sampleSize+extraSamples,3);
 	Eigen::VectorXd weights = Eigen::VectorXd::Zero(sampleSize+extraSamples);
 	Eigen::VectorXd resampledParticleIdx = Eigen::VectorXd::Zero(sampleSize+extraSamples);
 	Eigen::MatrixXd Jparticle;
@@ -457,7 +470,7 @@ void particle_filter(Model::ModelInterface* robot) {
 	timer.setLoopFrequency(filter_freq);   // 1 KHz
 	double last_time = timer.elapsedTime(); //secs
 	bool fTimerDidSleep = true;
-	timer.initializeTimer(1000000); // 1 ms pause before starting loop
+	timer.initializeTimer(1000000); // 1 ms pause_program before starting loop
 
 	while(fSimulationRunning)
 	{
@@ -474,6 +487,20 @@ void particle_filter(Model::ModelInterface* robot) {
 		}
 		switch(collision_index)
 		{
+			case 1 :
+			contact_detected = true;
+			robot->rotation(Ri3d, "link1");
+			robot->position(pos_i3d, "link1", Eigen::Vector3d::Zero());
+			//string currentLink("link3");
+			break;
+
+			case 2 :
+			contact_detected = true;
+			robot->rotation(Ri3d, "link2");
+			robot->position(pos_i3d, "link2", Eigen::Vector3d::Zero());
+			//string currentLink("link3");
+			break;
+
 			case 3 :
 			contact_detected = true;
 			robot->rotation(Ri3d, "link3");
@@ -552,7 +579,15 @@ void particle_filter(Model::ModelInterface* robot) {
 				Eigen::Vector3d particleVec;
 				particleVec = particleSet.row(j);
 
-				if(collision_index == 3) //find the jacobian for the current particle location
+				if(collision_index == 1) //find the jacobian for the current particle location
+				{
+			 		robot->Jv(Jparticle, "link1", particleVec); 
+				}
+				else if(collision_index == 2) //find the jacobian for the current particle location
+				{
+			 		robot->Jv(Jparticle, "link2", particleVec); 
+				}
+				else if(collision_index == 3) //find the jacobian for the current particle location
 				{
 			 		robot->Jv(Jparticle, "link3", particleVec); 
 				}
@@ -590,6 +625,15 @@ void particle_filter(Model::ModelInterface* robot) {
 			{
 				resampledParticleSet.row(i) = particleSet.row(resampledParticleIdx(i));
 			}
+
+		while(pause_program)
+		{
+			if(resume_program)
+			{
+				break;
+			}
+		}
+
 
 			// select the average
 			Eigen::Vector3d estimated_rc_3d = resampledParticleSet.colwise().mean();
@@ -703,7 +747,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	timer.setLoopFrequency(control_freq);   // 1 KHz
 	double last_time = timer.elapsedTime(); //secs
 	bool fTimerDidSleep = true;
-	timer.initializeTimer(1000000); // 1 ms pause before starting loop
+	timer.initializeTimer(1000000); // 1 ms pause_program before starting loop
 
 	unsigned long long controller_counter = 0;
 
@@ -722,6 +766,10 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// read joint positions, velocities, update model
 		sim->getJointPositions(robot_name, robot->_q);
 		sim->getJointVelocities(robot_name, robot->_dq);
+
+		// Eigen::VectorXd noise = 0.01*Eigen::VectorXd::Random(4);
+		// robot->_dq += noise;
+
 		robot->updateModel();
 		robot->gravityVector(gravity_compensation);
 
@@ -751,8 +799,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		x = pos3d.tail(2);
 		xdot = Jv2d*robot->_dq;
 
-		double mvt_freq = 0.3;
-		xd(0) = x_init(1) + 0.15*sin(2*M_PI*mvt_freq* time);
+		// double mvt_freq = 0.3;
+		// xd(0) = x_init(1) + 0.15*sin(2*M_PI*mvt_freq* time);
 
 		pos_task_force = Lambda*(-kp_pos*(x - xd) - kv_pos*xdot);
 		if(!gpjs)
@@ -783,7 +831,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// 	cout << "rc : " << estimated_rc.transpose() << endl;
 		// 	cout << endl;
 		// }
-		if(controller_counter == 3000)
+		if(controller_counter == 0)
+		// if(controller_counter == 3000)
 		// if(timer.elapsedTime() >= 1)
 		{
 			gpjs = false;
@@ -798,6 +847,15 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// -------------------------------------------
 		// update last time
 		last_time = curr_time;
+
+		while(pause_program)
+		{
+			if(resume_program)
+			{
+				break;
+			}
+		}
+
 	}
 
 	double end_time = timer.elapsedTime();
@@ -838,7 +896,8 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// integrate forward
 		double curr_time = timer.elapsedTime();
 		double loop_dt = curr_time - last_time; 
-		sim->integrate(loop_dt);
+		// sim->integrate(loop_dt);
+		sim->integrate(0.0005);
 
 		// update forces and contact point
 		point_list.clear();
@@ -903,6 +962,14 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 		//update last time
 		last_time = curr_time;
+
+		while(pause_program)
+		{
+			if(resume_program)
+			{
+				break;
+			}
+		}
 
 		simulation_counter++;
 	}

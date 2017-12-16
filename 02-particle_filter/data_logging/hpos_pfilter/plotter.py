@@ -35,10 +35,9 @@ plt.plot(rtime, rforce[:,1], label="Actual Force (z)", color="k", linewidth="1.5
 plt.plot(etime, eforce[:,1], label="Estimated Force (z)", color="r", linewidth="1.5", linestyle="--")
 plt.plot(rtime, rforce[:,0], label="Actual Force (y)", color="g", linewidth="1.5")
 plt.plot(etime, eforce[:,0], label="Estimated Force (z)", color="b", linewidth="1.5", linestyle="--")
-plt.legend(bbox_to_anchor=(1.0, 0.4), loc=1, borderaxespad=0.5)
-plt.title("Following a trajectory, Analytical approach\nForce", fontsize=20)
+plt.legend(bbox_to_anchor=(1.0, 0.8), loc=1, borderaxespad=0.5)
+plt.title("Hold Position, Particle Filter approach\nForce", fontsize=20)
 plt.ylabel("Force (N)", fontsize=17)
-plt.axis([2, 10, -130, 60])
 # plt.legend()
 
 
@@ -52,7 +51,6 @@ plt.legend(bbox_to_anchor=(1.0, 0.5), loc=1, borderaxespad=0.5)
 plt.title("Contact Position", fontsize=20)
 plt.xlabel("time (s)", fontsize=17)
 plt.ylabel("Position (m)", fontsize=17)
-plt.axis([2, 10, -0.1, 1.6])
 # plt.legend()
 
 

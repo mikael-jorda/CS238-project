@@ -36,7 +36,7 @@ plt.plot(etime, eforce[:,1], label="Estimated Force (z)", color="r", linewidth="
 plt.plot(rtime, rforce[:,0], label="Actual Force (y)", color="g", linewidth="1.5")
 plt.plot(etime, eforce[:,0], label="Estimated Force (z)", color="b", linewidth="1.5", linestyle="--")
 plt.legend(bbox_to_anchor=(1.0, 0.4), loc=1, borderaxespad=0.5)
-plt.title("Following a trajectory, Analytical approach\nForce", fontsize=20)
+plt.title("Following a trajectory, Particle Filter approach\nForce", fontsize=20)
 plt.ylabel("Force (N)", fontsize=17)
 plt.axis([2, 10, -130, 60])
 # plt.legend()

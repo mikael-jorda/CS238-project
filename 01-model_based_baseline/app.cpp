@@ -171,7 +171,7 @@ int main (int argc, char** argv) {
 	Prpf.setZero();
 	Prf.setZero();
 
-	getchar();
+	// getchar();
 
 	// start the simulation thread first
 	fSimulationRunning = true;
@@ -188,10 +188,10 @@ int main (int argc, char** argv) {
 		// update contact position and force
 		if(contact_detected)
 		{
-			sphere_rpos->setShowEnabled(true);
-			sphere_epos->setShowEnabled(true);
-			line_rforce->setShowEnabled(true);
-			line_eforce->setShowEnabled(true);
+			// sphere_rpos->setShowEnabled(true);
+			// sphere_epos->setShowEnabled(true);
+			// line_rforce->setShowEnabled(true);
+			// line_eforce->setShowEnabled(true);
 			sphere_epos->setLocalPos(Eigen::Vector3d(0.02,Pef(0),Pef(1)));
 			sphere_rpos->setLocalPos(Eigen::Vector3d(0.02,Prf(0),Prf(1)));
 			line_eforce->m_pointA = chai3d::cVector3d(Eigen::Vector3d(0.02,Pef(0),Pef(1)));
@@ -346,7 +346,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 	// collision identification
 	Eigen::VectorXd mu = Eigen::VectorXd::Zero(dof);
-	double eps_mu = 0.7;
+	double eps_mu = 1.5;
 	Eigen::Vector3d Fi;
 	int collision_index = 0;
 	Eigen::MatrixXd Ji = Eigen::MatrixXd(3,dof);
@@ -383,6 +383,13 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// read joint positions, velocities, update model
 		sim->getJointPositions(robot_name, robot->_q);
 		sim->getJointVelocities(robot_name, robot->_dq);
+
+		// introduce noise into velocity
+		// Eigen::VectorXd noise = 0.01*Eigen::VectorXd::Random(4);
+		// cout << noise << endl;
+		// robot->_q += noise;
+		// robot->_dq += noise;
+
 		robot->updateModel();
 		robot->gravityVector(gravity_compensation);
 
@@ -527,8 +534,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		x = pos3d.tail(2);
 		xdot = Jv2d*robot->_dq;
 
-		double mvt_freq = 0.3;
-		xd(0) = x_init(1) + 0.15*sin(2*M_PI*mvt_freq* time);
+		// double mvt_freq = 0.3;
+		// xd(0) = x_init(1) + 0.15*sin(2*M_PI*mvt_freq* time);
 
 		pos_task_force = Lambda*(-kp_pos*(x - xd) - kv_pos*xdot);
 		if(!gpjs)
