@@ -42,6 +42,21 @@ find_package(SAI2-COMMON REQUIRED)
 include_directories(${SAI2-COMMON_INCLUDE_DIRS})
 add_definitions(${SAI2-COMMON_DEFINITIONS})
 
+# - SAI2-MODEL
+find_package(SAI2-MODEL REQUIRED)
+include_directories(${SAI2-MODEL_INCLUDE_DIRS})
+add_definitions(${SAI2-MODEL_DEFINITIONS})
+
+# - SAI2-GRAPHICS
+find_package(SAI2-GRAPHICS REQUIRED)
+include_directories(${SAI2-GRAPHICS_INCLUDE_DIRS})
+add_definitions(${SAI2-GRAPHICS_DEFINITIONS})
+
+# - SAI2-URDF
+find_package(SAI2-URDF REQUIRED)
+include_directories(${SAI2-URDF_INCLUDE_DIRS})
+add_definitions(${SAI2-URDF_DEFINITIONS})
+
 # - glfw3
 find_package(glfw3 QUIET)
 find_library(GLFW_LIBRARY glfw)
@@ -63,6 +78,10 @@ endif ()
 set(BRACING2D_COMMON_LIBRARIES
 	${CHAI3D_LIBARIES}
 	${SAI2-COMMON_LIBRARIES}
+	${SAI2-GRAPHICS_LIBRARIES}
+	${SAI2-MODEL_LIBRARIES}
+	${SAI2-SIMULATION_LIBRARIES}
+	${SAI2-URDF_LIBRARIES}
 	${HIREDIS_LIBRARY}
 	${GLFW_LIBRARY}
 	${JSONCPP_LIBRARY}
@@ -72,4 +91,4 @@ set(BRACING2D_COMMON_LIBRARIES
 set (BRACING2D_BINARY_DIR                  ${PROJECT_SOURCE_DIR}/bin)
 
 add_subdirectory(01-model_based_baseline)
-add_subdirectory(02-particle_filter)
+# add_subdirectory(02-particle_filter)

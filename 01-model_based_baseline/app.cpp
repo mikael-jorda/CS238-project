@@ -3,9 +3,9 @@
 #include <thread>
 #include <math.h>
 
-#include "model/ModelInterface.h"
-#include "graphics/ChaiGraphics.h"
-#include "simulation/Sai2Simulation.h"
+#include "Sai2Model.h"
+#include "Sai2Graphics.h"
+#include "Sai2Simulation.h"
 #include <dynamics3d.h>
 
 #include <fstream>
@@ -46,8 +46,8 @@ Eigen::Vector2d Frpp, Frp, Frppf, Frpf, Frf;
 
 
 // simulation loop
-void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
-void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
+void control(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim);
+void simulation(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim);
 
 // initialize window manager
 GLFWwindow* glfwInitialize();
@@ -79,14 +79,14 @@ int main (int argc, char** argv) {
 	signal(SIGINT, &sighandler);
 
 	// load graphics scene
-	auto graphics = new Graphics::ChaiGraphics(world_file, Graphics::urdf, false);
+	auto graphics = new Sai2Graphics::Sai2Graphics(world_file, false);
 	Eigen::Vector3d camera_pos, camera_lookat, camera_vertical;
 	graphics->getCameraPose(camera_name, camera_pos, camera_vertical, camera_lookat);
 	// load robots
-	auto robot = new Model::ModelInterface(robot_file, Model::rbdl, Model::urdf, false);
+	auto robot = new Sai2Model::Sai2Model(robot_file, false);
 
 	// load simulation world
-	auto sim = new Simulation::Sai2Simulation(world_file, Simulation::urdf, false);
+	auto sim = new Simulation::Sai2Simulation(world_file, false);
 	sim->setCollisionRestitution(0);
 	sim->setCoeffFrictionStatic(0.6);
 
@@ -223,7 +223,7 @@ int main (int argc, char** argv) {
 }
 
 //------------------------------------------------------------------------------
-void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
+void control(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim) {
 	robot->updateModel();
 
 	int dof = robot->dof();
@@ -476,7 +476,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 }
 
 //------------------------------------------------------------------------------
-void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
+void simulation(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim) {
 	fSimulationRunning = true;
 
 	// real forces and contact point
